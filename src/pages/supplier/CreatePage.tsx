@@ -290,15 +290,23 @@ export function SupplierCreatePage() {
         return
       }
 
-      // 路径 B：上传文件（多选时取首个 .py 作为主算法源码登记）
+      // 路径 B：源码、可选测试脚本和数据集分别交给后端登记。
       if (sourceMode === 'upload' && files.length > 0) {
-        const primary = files.find((f) => f.name.toLowerCase().endsWith('.py')) || files[0]
-        if (!primary.name.toLowerCase().endsWith('.py')) {
+        const scripts = files.filter((file) => file.name.toLowerCase().endsWith('.py'))
+        const datasets = files.filter((file) => /\.(csv|tsv|json|txt|xlsx|parquet)$/i.test(file.name))
+        if (!scripts.length) {
           toast.message('请至少包含一个 .py 源码文件，或改用「AI 生成」')
           return
         }
+        if (scripts.length > 2 || datasets.length > 1 || scripts.length + datasets.length !== files.length) {
+          toast.error('请上传 1 个主源码、至多 1 个测试脚本和 1 个受支持的数据集')
+          return
+        }
+        const primary = scripts[0]
         const fd = new FormData()
         fd.append('file', primary)
+        if (scripts[1]) fd.append('test_file', scripts[1])
+        if (datasets[0]) fd.append('dataset_file', datasets[0])
         fd.append('name', name)
         fd.append('domain', form.domain)
         fd.append('industry', form.industry)
@@ -308,9 +316,7 @@ export function SupplierCreatePage() {
         if (draftId) fd.append('draft_id', draftId)
         const res = await uploadScenarioGenerated(fd)
         setPublishedId(res?.service?.id || null)
-        toast.success(files.length > 1
-          ? `算法商品已保存（主文件：${primary.name}；当前仅登记主文件），可在「我的算法商品」中查看`
-          : '算法商品已保存，可在「我的算法商品」中查看')
+        toast.success('算法商品及所选配套文件已保存，可在「我的算法商品」中查看')
         return
       }
 
@@ -510,12 +516,12 @@ export function SupplierCreatePage() {
 
               {sourceMode === 'upload' && (
                 <div className="bg-white rounded-2xl border border-black/5 p-5">
-                  <Field label="选择文件（支持多选，.py）">
+                  <Field label="选择文件（主源码 .py，可选测试 .py 和数据集）">
                     {/* 隐藏原生 input，避免「未选择文件」可点且切换后显示丢失 */}
                     <input
                       ref={fileInputRef}
                       type="file"
-                      accept=".py,.txt,.md,.json,.csv,.zip"
+                      accept=".py,.csv,.tsv,.json,.txt,.xlsx,.parquet"
                       multiple
                       className="sr-only"
                       onChange={(e) => {

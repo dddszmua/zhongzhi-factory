@@ -115,7 +115,7 @@ docker compose logs --tail=100 zhongzhi-frontend
 ## 当前功能与后端配套
 
 - 买家：引导式需求填写和市场检索、收藏列表、商品咨询、消息中心、已配置服务的在线试用。商品详情支持导入最多 20 条 JSON 用例进行浏览器端批量测评，按预期 JSON 比较输出；测评结果不会保存到服务器。
-- 供应商：服务端草稿、续编和发布，已登记商品编辑，消息回复，生成源码查看与下载。
+- 供应商：服务端草稿、续编和发布，已登记商品编辑，消息回复，生成源码查看与下载。手动上传可提交主 Python 源码、可选测试脚本及数据集，交由后端保存。
 - `ioeb_backend` 需要提供 `/api/services/mine`、`/api/services/<id>`、`/api/services/scenario-generated/upload`（支持 `draft_id`）、`/api/services/<id>/scenario-generated-code`、收藏关系接口及 `/api/messages/user` 等接口。源码下载只允许成果创建者，草稿仅创建者可见。
 - 保存草稿时，表单内容暂存于服务的 `source.companyIntroduce` 字段，使用 `ZZF_DRAFT_V1:` 前缀；文件和生成结果不随草稿保存，续编后需重新选择或生成。部署前应验证数据库字段容量能够容纳实际表单内容。
 - AI 生成或上传源码登记成功后，成果初始状态是 `not_deployed`。在线试用还需要供应商配置可访问的运行端点并部署服务。源码页仅显示已保存的 Python 源码，不执行代码。
