@@ -1,5 +1,5 @@
-import { useRef, useState } from 'react'
-import { useNavigate } from 'react-router'
+import { useEffect, useRef, useState } from 'react'
+import { useNavigate, useSearchParams } from 'react-router'
 import { ArrowLeft, Check, Cpu, Eye, Loader2, Sparkles, UploadCloud } from 'lucide-react'
 import { toast } from 'sonner'
 import { streamAutoGenerate, uploadScenarioGenerated, type AmlGenerateResult } from '@/api/scenarioDev'
@@ -8,7 +8,10 @@ import { Btn } from '@/components/ui/Btn'
 import { DOMAIN_OPTIONS, INDUSTRY_OPTIONS, BLUE, GREEN } from '@/lib/constants'
 import { mapAgentStepToFriendly, PROGRESS_STEPS } from '@/lib/scenarioConfig'
 import { buildDemoGenerateResult, isDemoGenerateName } from '@/lib/demoGenerate'
-import { saveLocalAlgorithmProduct } from '@/lib/localProducts'
+import { buildCreatePayload } from '@/lib/mappers'
+import { createService, getMyAlgorithmModels, updateService } from '@/api/services'
+
+const DRAFT_PREFIX = 'ZZF_DRAFT_V1:'
 
 /** 首期 4 步（价格/认证不做）——保持原设计交互 */
 const STEPS = ['填写业务信息', '配置输入输出', '上传模型或AI生成算法', '配置在线试用']
@@ -21,6 +24,8 @@ type SourceMode = 'upload' | 'generate' | null
 
 export function SupplierCreatePage() {
   const navigate = useNavigate()
+  const [params] = useSearchParams()
+  const draftId = params.get('draft') || ''
   const { user } = useAuth()
   const [step, setStep] = useState(0)
   const abortRef = useRef<AbortController | null>(null)
@@ -51,6 +56,45 @@ export function SupplierCreatePage() {
   const [genResult, setGenResult] = useState<AmlGenerateResult | null>(null)
   const [publishedId, setPublishedId] = useState<string | null>(null)
   const agentTickRef = useRef(0)
+
+  useEffect(() => {
+    if (!draftId || !user?.id) return
+    getMyAlgorithmModels(user.id).then((items) => {
+      const draft = items.find((item) => item.id === draftId && item.status === 'draft')
+      if (!draft) throw new Error('草稿不存在或无权编辑')
+      const encoded = draft.source?.companyIntroduce || ''
+      if (!encoded.startsWith(DRAFT_PREFIX)) throw new Error('草稿格式无法识别')
+      const saved = JSON.parse(encoded.slice(DRAFT_PREFIX.length)) as Partial<typeof form>
+      setForm((current) => ({ ...current, ...saved, name: draft.name }))
+    }).catch((error) => toast.error(error instanceof Error ? error.message : '草稿加载失败'))
+  }, [draftId, user?.id])
+
+  async function saveDraft() {
+    if (!user?.id) return
+    if (!form.name.trim()) {
+      toast.error('请先填写算法商品名称')
+      setStep(0)
+      return
+    }
+    setSaving(true)
+    try {
+      const description = form.problem.trim() || form.tagline.trim()
+      const payload = buildCreatePayload({
+        name: form.name.trim(), description, domain: form.domain, industry: form.industry,
+        scenario: form.scenario, inputType: form.inputTypes.join(' / '), outputType: form.outputTypes.join(' / '),
+      })
+      const source = { ...payload.source, companyIntroduce: `${DRAFT_PREFIX}${JSON.stringify(form)}`, msIntroduce: description }
+      const saved = draftId
+        ? await updateService(draftId, { name: payload.name, domain: payload.domain, industry: payload.industry, scenario: payload.scenario, source })
+        : await createService({ ...payload, status: 'draft', source })
+      if (!draftId && saved?.id) navigate(`/supplier/create?draft=${saved.id}`, { replace: true })
+      toast.success('草稿已保存。文件和 AI 生成结果需要在发布前重新选择或生成。')
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '保存草稿失败')
+    } finally {
+      setSaving(false)
+    }
+  }
 
   function toggle(list: string[], value: string) {
     return list.includes(value) ? list.filter((x) => x !== value) : [...list, value]
@@ -219,33 +263,6 @@ export function SupplierCreatePage() {
       const description = form.problem.trim() || form.tagline.trim()
       const name = form.name.trim()
 
-      const rememberPublished = (id?: string | null) => {
-        if (!user?.id) return
-        saveLocalAlgorithmProduct({
-          id: id || undefined,
-          name,
-          des: description,
-          domain: form.domain,
-          industry: form.industry,
-          scenario: form.scenario,
-          technology: 'AI',
-          creatorId: user.id,
-        })
-      }
-
-      const cacheLocalOnFail = () => {
-        if (!isDemoGenerateName(name) || !user?.id) return null
-        return saveLocalAlgorithmProduct({
-          name,
-          des: description,
-          domain: form.domain,
-          industry: form.industry,
-          scenario: form.scenario,
-          technology: 'AI',
-          creatorId: user.id,
-        })
-      }
-
       // 路径 A：AI 生成 → 登记 generated_algorithm
       if (sourceMode === 'generate' && genResult?.generated_code) {
         const blob = new Blob([genResult.generated_code], { type: 'text/x-python' })
@@ -257,6 +274,7 @@ export function SupplierCreatePage() {
         fd.append('scenario', form.scenario)
         fd.append('technology', 'AI')
         fd.append('attribute', 'custom')
+        if (draftId) fd.append('draft_id', draftId)
         fd.append(
           'source',
           JSON.stringify({
@@ -266,21 +284,9 @@ export function SupplierCreatePage() {
             companyIntroduce: form.tagline.trim() || description,
           }),
         )
-        try {
-          const res = await uploadScenarioGenerated(fd)
-          const id = res?.service?.id
-          setPublishedId(id || null)
-          rememberPublished(id)
-          toast.success('算法商品已发布，可在「我的算法商品」中查看')
-        } catch (err) {
-          const local = cacheLocalOnFail()
-          if (local) {
-            setPublishedId(local.id)
-            toast.success('算法商品已发布，可在「我的算法商品」中查看')
-          } else {
-            throw err
-          }
-        }
+        const res = await uploadScenarioGenerated(fd)
+        setPublishedId(res?.service?.id || null)
+        toast.success('算法商品已保存，可在「我的算法商品」中查看')
         return
       }
 
@@ -299,25 +305,12 @@ export function SupplierCreatePage() {
         fd.append('scenario', form.scenario)
         fd.append('technology', 'AI')
         fd.append('attribute', 'custom')
-        try {
-          const res = await uploadScenarioGenerated(fd)
-          const id = res?.service?.id
-          setPublishedId(id || null)
-          rememberPublished(id)
-          toast.success(
-            files.length > 1
-              ? `已发布（主文件：${primary.name}，共 ${files.length} 个文件），可在「我的算法商品」中查看`
-              : '算法商品已发布，可在「我的算法商品」中查看',
-          )
-        } catch (err) {
-          const local = cacheLocalOnFail()
-          if (local) {
-            setPublishedId(local.id)
-            toast.success('算法商品已发布，可在「我的算法商品」中查看')
-          } else {
-            throw err
-          }
-        }
+        if (draftId) fd.append('draft_id', draftId)
+        const res = await uploadScenarioGenerated(fd)
+        setPublishedId(res?.service?.id || null)
+        toast.success(files.length > 1
+          ? `算法商品已保存（主文件：${primary.name}；当前仅登记主文件），可在「我的算法商品」中查看`
+          : '算法商品已保存，可在「我的算法商品」中查看')
         return
       }
 
@@ -339,7 +332,7 @@ export function SupplierCreatePage() {
       </button>
 
       <div className="mb-6">
-        <h1 className="text-2xl font-extrabold text-gray-900">创建算法商品</h1>
+        <h1 className="text-2xl font-extrabold text-gray-900">{draftId ? '继续编辑算法草稿' : '创建算法商品'}</h1>
         <p className="text-sm text-gray-500 mt-1">
           请用业务语言说明这个算法能解决什么问题。平台会根据你的描述生成商品页与试用配置。
         </p>
@@ -656,6 +649,9 @@ export function SupplierCreatePage() {
               onClick={() => setStep((s) => Math.max(0, s - 1))}
             >
               上一步
+            </Btn>
+            <Btn variant="outline" disabled={saving || generating} onClick={() => void saveDraft()}>
+              {saving ? '保存中…' : '保存草稿'}
             </Btn>
             {step < STEPS.length - 1 ? (
               <Btn

@@ -1,8 +1,8 @@
 # 众智工场（Zhongzhi Factory）
 
-众智工场是面向算法模型供需双方的 Web 前端。买家可以浏览算法市场、查看商品详情和在线试用；供应商可以管理算法商品、通过发布向导创建商品，并配置试用服务。当前版本还提供登录、注册和「帮我找算法」入口。订单、定价与平台认证尚未开放。
+众智工场是面向算法模型供需双方的独立网站。买家可以浏览算法市场、查看商品详情、收藏、咨询供应商和在线试用；供应商可以创建并续编草稿、编辑商品信息、查看及下载生成源码、回复咨询，并配置试用服务。网站还提供登录、注册和「帮我找算法」入口。订单、定价与平台认证尚未开放。
 
-这是一个独立的 React 单页应用，通过 HTTP 调用 `ioeb_backend` 的 `/api` 接口及可选的 `Micro-Agent` 智能体接口。仓库仅包含前端；后端及智能体需分别部署。默认开发代理和容器 Nginx 代理均指向 `https://fdueblab.cn`。
+这是一个独立的 React 单页应用，通过 HTTP 调用 `ioeb_backend` 的 `/api` 接口及可选的 `Micro-Agent` 智能体接口。仓库仅包含前端；后端及智能体需分别部署。默认开发代理和容器 Nginx 代理均指向 `https://fdueblab.cn`。草稿、消息和源码权限依赖配套的 `ioeb_backend` 更新，发布新网站前须先部署配套后端。
 
 ## 技术栈
 
@@ -111,3 +111,12 @@ docker compose logs --tail=100 zhongzhi-frontend
 ## 与既有平台的关系
 
 本项目与旧版 `ioeb` Vue 前端并行；通过 REST API 消费 `ioeb_backend`，并按需调用 `Micro-Agent`。该仓库的构建与部署不依赖旧前端仓库。第三方素材与组件来源见 [ATTRIBUTIONS.md](ATTRIBUTIONS.md)。
+
+## 当前功能与后端配套
+
+- 买家：引导式需求填写和市场检索、收藏列表、商品咨询、消息中心、已配置服务的在线试用。商品详情支持导入最多 20 条 JSON 用例进行浏览器端批量测评，按预期 JSON 比较输出；测评结果不会保存到服务器。
+- 供应商：服务端草稿、续编和发布，已登记商品编辑，消息回复，生成源码查看与下载。
+- `ioeb_backend` 需要提供 `/api/services/mine`、`/api/services/<id>`、`/api/services/scenario-generated/upload`（支持 `draft_id`）、`/api/services/<id>/scenario-generated-code`、收藏关系接口及 `/api/messages/user` 等接口。源码下载只允许成果创建者，草稿仅创建者可见。
+- 保存草稿时，表单内容暂存于服务的 `source.companyIntroduce` 字段，使用 `ZZF_DRAFT_V1:` 前缀；文件和生成结果不随草稿保存，续编后需重新选择或生成。部署前应验证数据库字段容量能够容纳实际表单内容。
+- AI 生成或上传源码登记成功后，成果初始状态是 `not_deployed`。在线试用还需要供应商配置可访问的运行端点并部署服务。源码页仅显示已保存的 Python 源码，不执行代码。
+- 前端发布前执行 `npm.cmd run typecheck` 与 `npm.cmd run build`；后端至少执行 `python -m py_compile app/api/namespaces/service_ns.py app/api/namespaces/message_ns.py app/services/service_service.py app/services/service_message_service.py`，然后联调登录、草稿权限、咨询和源码下载。更新后端与前端时，先部署后端，再部署网站。

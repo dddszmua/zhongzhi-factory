@@ -10,7 +10,7 @@ export function NavBar() {
   const navigate = useNavigate()
 
   const navItems = [
-    { label: '找算法', to: '/market' },
+    { label: '找算法', to: '/demand' },
     { label: 'AI算法市场', to: '/market' },
     { label: '行业方案', to: '/market' },
     { label: '定制开发', to: '/market' },
@@ -46,6 +46,8 @@ export function NavBar() {
         <div className="hidden lg:flex items-center gap-2 shrink-0">
           {isAuthenticated ? (
             <>
+              <Link to="/favorites" className="px-2 py-2 text-sm text-gray-600 hover:text-blue-600">我的收藏</Link>
+              <Link to="/messages" className="px-2 py-2 text-sm text-gray-600 hover:text-blue-600">消息</Link>
               <span className="text-sm text-gray-600 font-medium max-w-[120px] truncate">
                 {user?.name || user?.username}
               </span>
@@ -118,6 +120,7 @@ export function NavBar() {
               免费试用
             </button>
           </div>
+          {isAuthenticated && <div className="flex gap-5 text-sm text-blue-600"><Link to="/favorites" onClick={() => setMobileOpen(false)}>我的收藏</Link><Link to="/messages" onClick={() => setMobileOpen(false)}>消息中心</Link></div>}
         </div>
       )}
     </header>

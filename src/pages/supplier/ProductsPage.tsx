@@ -4,7 +4,6 @@ import { Search, PlusCircle } from 'lucide-react'
 import { getMyAlgorithmModels } from '@/api/services'
 import { useAuth } from '@/auth/AuthContext'
 import { completenessOf, mapServices, type AlgorithmProduct } from '@/lib/mappers'
-import { mergeLocalAlgorithmProducts } from '@/lib/localProducts'
 import { Badge } from '@/components/ui/Badge'
 import { Btn } from '@/components/ui/Btn'
 import { BLUE } from '@/lib/constants'
@@ -16,6 +15,7 @@ export function SupplierProductsPage() {
   const { user } = useAuth()
   const [products, setProducts] = useState<AlgorithmProduct[]>([])
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
   const [keyword, setKeyword] = useState('')
   const [filter, setFilter] = useState<FilterKey>('all')
 
@@ -31,12 +31,11 @@ export function SupplierProductsPage() {
       }
       try {
         const list = await getMyAlgorithmModels(user.id, user.username)
-        const merged = mergeLocalAlgorithmProducts(list, user.id)
-        if (!cancelled) setProducts(mapServices(merged))
-      } catch {
+        if (!cancelled) setProducts(mapServices(list))
+      } catch (cause) {
         if (!cancelled) {
-          const localOnly = mergeLocalAlgorithmProducts([], user.id)
-          setProducts(mapServices(localOnly))
+          setProducts([])
+          setError(cause instanceof Error ? cause.message : '商品加载失败')
         }
       } finally {
         if (!cancelled) setLoading(false)
@@ -114,6 +113,8 @@ export function SupplierProductsPage() {
         <div className="xl:col-span-2 space-y-4">
           {loading ? (
             <div className="text-sm text-gray-400 py-12 text-center">加载中…</div>
+          ) : error ? (
+            <div className="text-sm text-red-600 py-12 text-center bg-white rounded-2xl border border-black/5">商品加载失败：{error}</div>
           ) : filtered.length === 0 ? (
             <div className="text-sm text-gray-400 py-12 text-center bg-white rounded-2xl border border-black/5">
               暂无商品，点击「发布新算法」开始创建
@@ -143,6 +144,7 @@ export function SupplierProductsPage() {
                   <div>场景：{p.domainLabel}</div>
                 </div>
                 <div className="flex gap-2 mt-4">
+                  {p.status === 'draft' ? <button className="px-3 py-1.5 text-xs font-semibold text-blue-600 bg-blue-50 rounded-lg" onClick={() => navigate(`/supplier/create?draft=${p.id}`)}>继续编辑草稿</button> : <button className="px-3 py-1.5 text-xs font-semibold text-blue-600 bg-blue-50 rounded-lg" onClick={() => navigate(`/supplier/products/${p.id}/edit`)}>编辑商品</button>}
                   <button
                     className="px-3 py-1.5 text-xs font-semibold text-white rounded-lg"
                     style={{ background: BLUE }}
@@ -150,12 +152,18 @@ export function SupplierProductsPage() {
                   >
                     查看商品页
                   </button>
-                  <button
+                  {p.status !== 'draft' && <button
                     className="px-3 py-1.5 text-xs font-semibold text-blue-600 bg-blue-50 rounded-lg"
                     onClick={() => navigate(`/supplier/trial?id=${p.id}`)}
                   >
                     配置试用
-                  </button>
+                  </button>}
+                  {p.status !== 'draft' && <button
+                    className="px-3 py-1.5 text-xs font-semibold text-blue-600 bg-blue-50 rounded-lg"
+                    onClick={() => navigate(`/supplier/products/${p.id}/code`)}
+                  >
+                    查看生成源码
+                  </button>}
                 </div>
               </div>
             ))
