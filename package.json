@@ -1,0 +1,33 @@
+{
+  "name": "zhongzhi-factory",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "众智工场 — AI 算法模型交易与交付平台（独立前端）",
+  "scripts": {
+    "dev": "vite",
+    "typecheck": "tsc --noEmit",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "axios": "^1.10.0",
+    "clsx": "2.1.1",
+    "lucide-react": "0.487.0",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "react-router": "7.13.0",
+    "sonner": "2.0.3",
+    "tailwind-merge": "3.2.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "4.1.12",
+    "@types/node": "^26.1.1",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "4.7.0",
+    "tailwindcss": "4.1.12",
+    "typescript": "^5.7.2",
+    "vite": "6.3.5"
+  }
+}

@@ -1,0 +1,113 @@
+# 众智工场（Zhongzhi Factory）
+
+众智工场是面向算法模型供需双方的 Web 前端。买家可以浏览算法市场、查看商品详情和在线试用；供应商可以管理算法商品、通过发布向导创建商品，并配置试用服务。当前版本还提供登录、注册和「帮我找算法」入口。订单、定价与平台认证尚未开放。
+
+这是一个独立的 React 单页应用，通过 HTTP 调用 `ioeb_backend` 的 `/api` 接口及可选的 `Micro-Agent` 智能体接口。仓库仅包含前端；后端及智能体需分别部署。默认开发代理和容器 Nginx 代理均指向 `https://fdueblab.cn`。
+
+## 技术栈
+
+- React 18、TypeScript、Vite 6、React Router 7
+- Tailwind CSS 4、Axios、Lucide React
+- Node.js 20、npm（以 `package-lock.json` 锁定依赖）
+- 生产环境：Docker 多阶段构建 + Nginx
+
+## 代码结构
+
+```text
+zhongzhi-factory/
+├─ src/
+│  ├─ api/                 # HTTP 客户端、认证、商品和智能体接口
+│  ├─ auth/                # 登录状态与受保护路由
+│  ├─ app/                 # 路由入口及预留的通用 UI 组件
+│  ├─ components/          # 页面共用布局与商品组件
+│  ├─ lib/                 # 数据映射、本地状态和场景配置
+│  ├─ pages/               # 买家页面与 supplier/ 供应商页面
+│  ├─ styles/              # 全局样式与主题
+│  └─ main.tsx             # 浏览器入口
+├─ public/                 # 原样复制到站点根目录的静态文件
+├─ .env.example            # 开发环境配置示例
+├─ vite.config.ts          # Vite 开发服务与 API 代理
+├─ Dockerfile              # 前端构建和 Nginx 运行镜像
+├─ nginx.conf              # SPA 路由回退与生产 API 代理
+├─ docker-compose.yml      # 单容器部署，宿主机端口 8088
+└─ .github/workflows/ci.yml # main 推送和 PR 的构建检查
+```
+
+## 拉取并在本地运行
+
+前提：安装 Node.js 20 和 npm。以下命令以 Windows PowerShell 为例；若 PowerShell 禁止运行 `npm.ps1`，使用 `npm.cmd` 即可。在 macOS/Linux 上把 `npm.cmd` 换成 `npm`。
+
+```powershell
+git clone <本仓库的 GitHub HTTPS 或 SSH 地址>
+cd zhongzhi-factory
+npm.cmd ci
+npm.cmd run dev
+```
+
+浏览器打开终端显示的地址，通常为 <http://localhost:5173>。停止服务按 `Ctrl+C`。已有代码时，先 `git pull --ff-only`，再根据锁文件变化运行 `npm.cmd ci`。
+
+不创建环境文件时，代码中的默认值会连接线上接口。`.env.example` 列出了可配置项；需要覆盖时，将其复制为不会提交的 `.env.development`：
+
+```powershell
+Copy-Item .env.example .env.development
+```
+
+| 变量 | 默认值 | 用途 |
+| --- | --- | --- |
+| `VITE_API_BASE_URL` | `/api` | 浏览器调用后端的 URL 前缀 |
+| `VITE_AGENT_BASE_URL` | 空 | 智能体接口的浏览器 URL 前缀，留空时沿用同源 `/api/agent` |
+| `VITE_DEV_API_PROXY` | `https://fdueblab.cn` | Vite 将 `/api` 转发到的后端 |
+| `VITE_DEV_AGENT_PROXY` | `https://fdueblab.cn` | Vite 将 `/api/agent` 转发到的智能体服务 |
+
+本地联调后端时，可在 `.env.development` 中设为 `http://127.0.0.1:5000` 和 `http://127.0.0.1:8010`。代理配置变更后重启开发服务。`VITE_` 变量会进入前端构建产物，不能放密码或密钥。
+
+## 构建与验证
+
+```powershell
+npm.cmd ci
+npm.cmd run typecheck
+npm.cmd run build
+npm.cmd run preview
+```
+
+`build` 生成 `dist/`；`preview` 仅用于本地检查构建结果，生产部署请使用下述 Docker/Nginx 流程。GitHub Actions 会在推送 `main` 和提交到 `main` 的拉取请求时执行 `npm ci`、`npm run typecheck`、`npm run build`。
+
+## 生产部署
+
+服务器需要安装 Git 和 Docker（含 Compose 插件），并能访问 npm 镜像源与 `https://fdueblab.cn`。在服务器克隆仓库后执行：
+
+```bash
+git clone <本仓库的 GitHub HTTPS 或 SSH 地址>
+cd zhongzhi-factory
+docker compose up -d --build
+docker compose ps
+```
+
+默认映射为服务器的 `8088` 端口，访问 `http://<服务器 IP>:8088`。Dockerfile 以 `npm ci` 安装锁定依赖、构建前端，再由 Nginx 提供静态文件。`nginx.conf` 为 React 路由配置了 `index.html` 回退，并把 `/api/agent/` 和 `/api/` 反向代理到 `https://fdueblab.cn`。
+
+若要绑定正式域名和 HTTPS，请在服务器入口反向代理中把域名转发到本服务的 `8088` 端口，并配置 TLS 证书；同时按需调整服务器防火墙和 `docker-compose.yml` 的端口映射。若生产 API 不在 `fdueblab.cn`，部署前修改 `nginx.conf` 的两处 `proxy_pass` 及对应 `Host` 请求头，然后重新构建镜像。不要仅修改 `.env.development`：它只影响本地 Vite 开发服务。
+
+更新部署：
+
+```bash
+cd zhongzhi-factory
+git pull --ff-only origin main
+docker compose up -d --build
+docker compose ps
+docker compose logs --tail=100 zhongzhi-frontend
+```
+
+发布后检查首页、直接刷新 `/market` 等子路由，以及登录和 API 请求是否正常。需要回退时，检出上一个已验证的提交并重新执行 `docker compose up -d --build`；不要在生产服务器直接修改源代码。
+
+## Git 工作流
+
+1. 从最新的 `main` 创建功能分支：`git switch main`、`git pull --ff-only`、`git switch -c feat/<简短名称>`。修复分支可用 `fix/<简短名称>`。
+2. 在分支开发并运行 `npm ci`、`npm run typecheck`、`npm run build`；提交时只加入相关文件，提交说明可采用 `feat: ...`、`fix: ...`、`docs: ...`。
+3. 推送分支：`git push -u origin <分支名>`，在 GitHub 发起指向 `main` 的 Pull Request。说明改动、验证步骤，以及涉及的配置或部署影响。
+4. 等待 CI 通过并完成代码审查后合并。部署只从 `main` 的已验证提交进行；紧急修复也通过修复分支和 PR 回到 `main`。
+
+不要提交 `node_modules/`、`dist/`、本地 `.env.development`、`.env.local` 或包含密钥的文件；依赖变化时提交 `package.json` 和 `package-lock.json`。
+
+## 与既有平台的关系
+
+本项目与旧版 `ioeb` Vue 前端并行；通过 REST API 消费 `ioeb_backend`，并按需调用 `Micro-Agent`。该仓库的构建与部署不依赖旧前端仓库。第三方素材与组件来源见 [ATTRIBUTIONS.md](ATTRIBUTIONS.md)。
