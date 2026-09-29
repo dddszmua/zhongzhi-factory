@@ -6,6 +6,8 @@ import { SupplierLayout } from '@/components/layout/SupplierLayout'
 import { HomePage } from '@/pages/HomePage'
 import { DemandPage } from '@/pages/DemandPage'
 import { MarketPage } from '@/pages/MarketPage'
+import { McpMarketPage } from '@/pages/McpMarketPage'
+import { McpServicePage } from '@/pages/McpServicePage'
 import { ProductDetailPage } from '@/pages/ProductDetailPage'
 import { FavoritesPage } from '@/pages/FavoritesPage'
 import { MessagesPage } from '@/pages/MessagesPage'
@@ -17,6 +19,8 @@ import { SupplierCreatePage } from '@/pages/supplier/CreatePage'
 import { SupplierTrialPage } from '@/pages/supplier/TrialPage'
 import { EditProductPage } from '@/pages/supplier/EditProductPage'
 import { GeneratedCodePage } from '@/pages/supplier/GeneratedCodePage'
+import { McpJobsPage } from '@/pages/supplier/McpJobsPage'
+import { McpPackagingPage } from '@/pages/supplier/McpPackagingPage'
 
 export default function App() {
   return (
@@ -25,6 +29,8 @@ export default function App() {
         <Routes>
           <Route path="/" element={<HomePage />} />
           <Route path="/market" element={<MarketPage />} />
+          <Route path="/mcp-market" element={<McpMarketPage />} />
+          <Route path="/mcp-services/:id" element={<McpServicePage />} />
           <Route path="/demand" element={<DemandPage />} />
           <Route path="/products/:id" element={<ProductDetailPage />} />
           <Route path="/favorites" element={<RequireAuth><FavoritesPage /></RequireAuth>} />
@@ -46,6 +52,9 @@ export default function App() {
             <Route path="products/:id/code" element={<GeneratedCodePage />} />
             <Route path="create" element={<SupplierCreatePage />} />
             <Route path="trial" element={<SupplierTrialPage />} />
+            <Route path="mcp" element={<McpJobsPage />} />
+            <Route path="mcp/create" element={<McpPackagingPage />} />
+            <Route path="mcp/jobs/:jobId" element={<McpPackagingPage />} />
           </Route>
 
           <Route path="*" element={<Navigate to="/" replace />} />
