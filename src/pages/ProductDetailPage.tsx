@@ -1,12 +1,15 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router'
-import { ArrowLeft, Play, UploadCloud } from 'lucide-react'
+import { ArrowLeft, Heart, Play, UploadCloud } from 'lucide-react'
 import { toast } from 'sonner'
 import { NavBar } from '@/components/layout/NavBar'
 import { Footer } from '@/components/layout/Footer'
 import { Badge } from '@/components/ui/Badge'
 import { Btn } from '@/components/ui/Btn'
+import { BatchEvaluationPanel } from '@/components/product/BatchEvaluationPanel'
 import { getServiceById, trialInvoke } from '@/api/services'
+import { addInterested, getInterestedAlgorithms, removeInterested, sendInquiry } from '@/api/marketplace'
+import { useAuth } from '@/auth/AuthContext'
 import { mapServiceToProduct, type AlgorithmProduct } from '@/lib/mappers'
 import { BLUE } from '@/lib/constants'
 
@@ -14,11 +17,16 @@ export function ProductDetailPage() {
   const { id } = useParams<{ id: string }>()
   const [params] = useSearchParams()
   const navigate = useNavigate()
+  const { user, isAuthenticated } = useAuth()
   const [product, setProduct] = useState<AlgorithmProduct | null>(null)
   const [loading, setLoading] = useState(true)
   const [inputText, setInputText] = useState('{\n  "sample": "请输入试用请求 JSON"\n}')
   const [result, setResult] = useState<string>('')
   const [running, setRunning] = useState(false)
+  const [interested, setInterested] = useState(false)
+  const [favoriteBusy, setFavoriteBusy] = useState(false)
+  const [inquiry, setInquiry] = useState('')
+  const [inquiryBusy, setInquiryBusy] = useState(false)
   const showTrial = params.get('trial') === '1'
 
   useEffect(() => {
@@ -45,6 +53,48 @@ export function ProductDetailPage() {
       cancelled = true
     }
   }, [id])
+
+  useEffect(() => {
+    if (!id || !isAuthenticated) return
+    getInterestedAlgorithms().then((list) => setInterested(list.some((service) => service.id === id))).catch(() => setInterested(false))
+  }, [id, isAuthenticated])
+
+  async function toggleFavorite() {
+    if (!id) return
+    if (!isAuthenticated) {
+      navigate(`/login?redirect=${encodeURIComponent(`/products/${id}`)}`)
+      return
+    }
+    setFavoriteBusy(true)
+    try {
+      if (interested) await removeInterested(id)
+      else await addInterested(id)
+      setInterested(!interested)
+      toast.success(interested ? '已取消收藏' : '已加入收藏')
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '操作失败')
+    } finally {
+      setFavoriteBusy(false)
+    }
+  }
+
+  async function submitInquiry() {
+    if (!id || !inquiry.trim()) return
+    if (!isAuthenticated) {
+      navigate(`/login?redirect=${encodeURIComponent(`/products/${id}`)}`)
+      return
+    }
+    setInquiryBusy(true)
+    try {
+      await sendInquiry(id, inquiry.trim())
+      setInquiry('')
+      toast.success('咨询已发送，可在消息中心查看回复')
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '咨询发送失败')
+    } finally {
+      setInquiryBusy(false)
+    }
+  }
 
   async function runTrial() {
     if (!product) return
@@ -92,7 +142,7 @@ export function ProductDetailPage() {
             <div className="text-sm text-gray-400 py-20 text-center">加载中…</div>
           ) : !product ? (
             <div className="text-sm text-gray-400 py-20 text-center">未找到该算法商品</div>
-          ) : (
+          ) : (<>
             <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
               <div className="lg:col-span-3 space-y-5">
                 <div className="bg-white rounded-2xl border border-black/5 p-6">
@@ -137,8 +187,17 @@ export function ProductDetailPage() {
                     <Link to="/market">
                       <Btn variant="outline">浏览更多</Btn>
                     </Link>
+                    <Btn variant="outline" disabled={favoriteBusy} onClick={() => void toggleFavorite()}>
+                      <Heart size={14} className={interested ? 'fill-blue-600 text-blue-600' : ''} /> {interested ? '已收藏' : '收藏'}
+                    </Btn>
                   </div>
                 </div>
+                {(!user?.id || product.creatorId !== user.id) && <div className="bg-white rounded-2xl border border-black/5 p-6">
+                  <h2 className="font-bold text-gray-900">咨询供应商</h2>
+                  <p className="text-xs text-gray-500 mt-1 mb-3">描述业务需求或试用问题，供应商会在消息中心回复。</p>
+                  <textarea value={inquiry} onChange={(event) => setInquiry(event.target.value)} maxLength={2000} rows={4} placeholder="例如：我的数据格式能否用于这个算法？" className="w-full border border-gray-200 rounded-xl p-3 text-sm resize-y" />
+                  <div className="flex items-center gap-4 mt-3"><Btn disabled={inquiryBusy || !inquiry.trim()} onClick={() => void submitInquiry()}>{inquiryBusy ? '发送中…' : '发送咨询'}</Btn><Link className="text-sm text-blue-600" to="/messages">查看消息</Link></div>
+                </div>}
               </div>
 
               <div className="lg:col-span-2" id="trial-panel">
@@ -174,7 +233,8 @@ export function ProductDetailPage() {
                 </div>
               </div>
             </div>
-          )}
+            <BatchEvaluationPanel endpoint={product.endpoint || ''} method={product.method || 'POST'} />
+          </>)}
         </div>
       </main>
       <Footer />

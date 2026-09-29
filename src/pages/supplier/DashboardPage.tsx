@@ -4,7 +4,6 @@ import { ShoppingBag, Play, PlusCircle, FlaskConical, AlertCircle } from 'lucide
 import { getMyAlgorithmModels } from '@/api/services'
 import { useAuth } from '@/auth/AuthContext'
 import { mapServices, type AlgorithmProduct } from '@/lib/mappers'
-import { mergeLocalAlgorithmProducts } from '@/lib/localProducts'
 import { Badge } from '@/components/ui/Badge'
 import { BLUE, PURPLE, AMBER, GREEN } from '@/lib/constants'
 
@@ -13,6 +12,7 @@ export function SupplierDashboardPage() {
   const { user } = useAuth()
   const [products, setProducts] = useState<AlgorithmProduct[]>([])
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
 
   useEffect(() => {
     let cancelled = false
@@ -26,11 +26,11 @@ export function SupplierDashboardPage() {
       }
       try {
         const list = await getMyAlgorithmModels(user.id, user.username)
-        const merged = mergeLocalAlgorithmProducts(list, user.id)
-        if (!cancelled) setProducts(mapServices(merged))
-      } catch {
+        if (!cancelled) setProducts(mapServices(list))
+      } catch (cause) {
         if (!cancelled) {
-          setProducts(mapServices(mergeLocalAlgorithmProducts([], user.id)))
+          setProducts([])
+          setError(cause instanceof Error ? cause.message : '商品加载失败')
         }
       } finally {
         if (!cancelled) setLoading(false)
@@ -63,6 +63,7 @@ export function SupplierDashboardPage() {
         <h1 className="text-2xl font-extrabold text-gray-900">供应商中心</h1>
         <p className="text-sm text-gray-500 mt-1">管理你的算法商品与在线试用配置。</p>
       </div>
+      {error && <div className="rounded-xl bg-red-50 text-red-700 px-4 py-3 text-sm">商品数据加载失败：{error}</div>}
 
       <div className="grid grid-cols-2 xl:grid-cols-4 gap-4">
         {kpis.map(({ label, value, icon: Icon, color, bg, delta }) => (

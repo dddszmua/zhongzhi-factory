@@ -17,7 +17,7 @@ export async function filterServices(params: Record<string, string | number | un
 /** 算法市场专用：只拉 type=generated_algorithm */
 export async function filterAlgorithmModels(params: Record<string, string | number | undefined> = {}) {
   const list = await filterServices({ ...params, type: ALGORITHM_MODEL_TYPE })
-  return onlyAlgorithmModels(list)
+  return onlyAlgorithmModels(list).filter((service) => service.status !== 'draft')
 }
 
 export async function searchServices(keyword: string) {
@@ -26,7 +26,7 @@ export async function searchServices(keyword: string) {
 }
 
 export async function searchAlgorithmModels(keyword: string) {
-  return onlyAlgorithmModels(await searchServices(keyword))
+  return onlyAlgorithmModels(await searchServices(keyword)).filter((service) => service.status !== 'draft')
 }
 
 export async function smartSearch(params: {
@@ -49,7 +49,7 @@ export async function smartSearchAlgorithmModels(params: {
   function?: string
   requirement?: string
 }) {
-  return onlyAlgorithmModels(await smartSearch(params))
+  return onlyAlgorithmModels(await smartSearch(params)).filter((service) => service.status !== 'draft')
 }
 
 export async function getServiceById(id: string) {
@@ -57,42 +57,11 @@ export async function getServiceById(id: string) {
   return res.service as BackendService
 }
 
-/** 线上 creatorId 常为空：用商品名前缀匹配用户名（如 WST-xxx / wst_xxx） */
-function isNameOwnedByUsername(name: string | undefined, username: string): boolean {
-  const n = (name || '').trim().toLowerCase()
-  const u = username.trim().toLowerCase()
-  if (!n || !u) return false
-  return n === u || n.startsWith(`${u}-`) || n.startsWith(`${u}_`) || n.startsWith(u)
-}
-
-function isOwnedByUser(svc: BackendService, userId: string, username?: string): boolean {
-  const cid = String(svc.creatorId || '').trim()
-  if (cid && userId && cid === String(userId)) return true
-  if (username && isNameOwnedByUsername(svc.name, username)) return true
-  return false
-}
-
-/**
- * 当前用户的算法模型列表。
- * 不请求 /services/mine（线上会把 mine 当服务 id 报错）。
- * 直接拉 generated_algorithm，再按 creatorId / 用户名前缀归属。
- */
-export async function getMyAlgorithmModels(userId: string, username?: string): Promise<BackendService[]> {
-  if (!userId && !username) return []
-
-  let list: BackendService[] = []
-  try {
-    list = await filterServices({ type: ALGORITHM_MODEL_TYPE })
-  } catch {
-    try {
-      const res: ListResponse = await apiClient.get('/services')
-      list = res.services || []
-    } catch {
-      list = []
-    }
-  }
-
-  return onlyAlgorithmModels(list).filter((s) => isOwnedByUser(s, userId, username))
+/** 只使用后端按登录身份返回的列表，不通过商品名推测所有权。 */
+export async function getMyAlgorithmModels(userId: string, _username?: string): Promise<BackendService[]> {
+  if (!userId) return []
+  const res: ListResponse = await apiClient.get('/services/mine')
+  return onlyAlgorithmModels(res.services || [])
 }
 
 export async function createService(data: Record<string, unknown>) {
@@ -119,6 +88,11 @@ export async function uploadServicePackage(formData: FormData) {
     headers: { 'Content-Type': 'multipart/form-data' },
     timeout: 120000,
   })
+}
+
+/** 源码仅允许成果创建者读取；通过 axios 自动携带登录令牌。 */
+export async function getGeneratedCode(id: string): Promise<Blob> {
+  return apiClient.get(`/services/${id}/scenario-generated-code`, { responseType: 'blob' }) as Promise<Blob>
 }
 
 /** 尝试调用已部署服务（买家试用） */

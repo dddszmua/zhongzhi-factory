@@ -20,6 +20,7 @@ const sidebarItems = [
   { icon: ShoppingBag, label: '我的算法商品', to: '/supplier/products' },
   { icon: PlusCircle, label: '发布新算法', to: '/supplier/create' },
   { icon: FlaskConical, label: '在线试用配置', to: '/supplier/trial' },
+  { icon: Bell, label: '咨询消息', to: '/messages' },
   { icon: BadgeCheck, label: '评测认证', to: null },
   { icon: ShoppingCart, label: '订单与交易', to: null },
   { icon: BookOpen, label: '案例与模板', to: null },
@@ -108,7 +109,7 @@ export function SupplierLayout() {
             </button>
           </div>
           <div className="flex items-center gap-3">
-            <button className="relative p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-all">
+            <button onClick={() => navigate('/messages')} aria-label="消息中心" className="relative p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-all">
               <Bell size={18} />
             </button>
             <div className="flex items-center gap-2 pl-3 border-l border-gray-100">
