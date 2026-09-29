@@ -6,6 +6,7 @@ const labels: Record<string, string> = {
   draft: '编辑中', packaging: '正在生成', packaged: '封装包已生成',
   deploying: '正在部署', deployed: '已通过协议验证', failed: '生成失败',
   cancelling: '正在取消', cancelled: '已取消', interrupted: '任务中断',
+  awaiting_check: '待工具验证', deploy_failed: '部署失败',
 }
 
 export function McpJobsPage() {
