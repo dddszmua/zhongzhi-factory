@@ -12,6 +12,7 @@ export function NavBar() {
   const navItems = [
     { label: '找算法', to: '/demand' },
     { label: 'AI算法市场', to: '/market' },
+    { label: 'MCP服务', to: '/mcp-market' },
     { label: '行业方案', to: '/market' },
     { label: '定制开发', to: '/market' },
     { label: '案例库', to: '/market' },

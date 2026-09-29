@@ -164,6 +164,10 @@ export function SupplierProductsPage() {
                   >
                     查看生成源码
                   </button>}
+                  {p.status !== 'draft' && <button
+                    className="px-3 py-1.5 text-xs font-semibold text-blue-600 bg-blue-50 rounded-lg"
+                    onClick={() => navigate(`/supplier/mcp/create?sourceServiceId=${encodeURIComponent(p.id)}`)}
+                  >封装为 MCP 服务</button>}
                 </div>
               </div>
             ))
