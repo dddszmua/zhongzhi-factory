@@ -54,7 +54,7 @@ export function SupplierDashboardPage() {
 
   const actions = [
     { title: '发布新算法', desc: '用业务语言创建算法商品，可选 AI 生成模型。', btn: '开始发布', icon: PlusCircle, color: BLUE, to: '/supplier/create' },
-    { title: '配置在线试用', desc: '部署服务，让买家可以立即体验算法效果。', btn: '配置试用', icon: FlaskConical, color: PURPLE, to: '/supplier/trial' },
+    { title: '配置在线试用', desc: '核对输入规范并运行合成样例，审核后开放试用。', btn: '配置试用', icon: FlaskConical, color: PURPLE, to: '/supplier/trial' },
   ]
 
   return (

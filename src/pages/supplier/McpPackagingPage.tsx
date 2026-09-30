@@ -8,6 +8,7 @@ import {
   packageMcpJob, saveMcpSpec, submitMcpReview, suggestMcpIntent, uploadMcpSource, type McpJob, type McpTool,
 } from '@/api/mcpPackaging'
 import type { BackendService } from '@/lib/mappers'
+import { isClinicalDomain, readClinicalCard } from '@/lib/clinical'
 
 const steps = ['选择源码', '填写想定', '确认工具', '生成封装', '部署验证']
 
@@ -61,15 +62,18 @@ export function McpPackagingPage() {
       getMcpJob(jobId).then(sync).catch((cause) => setError(cause instanceof Error ? cause.message : '读取任务失败'))
       return
     }
-    if (!initialSource || created.current) return
+    if (!initialSource || created.current || !user?.id) return
     created.current = true
-    createMcpJob(initialSource).then((value) => navigate(`/supplier/mcp/jobs/${value.id}`, { replace: true }))
+    getMyAlgorithmModels(user.id).then((items) => {
+      if (!items.some((item) => item.id === initialSource && isClinicalDomain(item) && readClinicalCard(item))) throw new Error('请先为该模型补全临床说明卡')
+      return createMcpJob(initialSource)
+    }).then((value) => navigate(`/supplier/mcp/jobs/${value.id}`, { replace: true }))
       .catch((cause) => setError(cause instanceof Error ? cause.message : '无法使用该算法'))
-  }, [jobId, initialSource, navigate])
+  }, [jobId, initialSource, navigate, user?.id])
 
   useEffect(() => {
     if (!user?.id) return
-    getMyAlgorithmModels(user.id, user.username).then((items) => setAlgorithms(items.filter((item) => item.status !== 'draft'))).catch(() => setAlgorithms([]))
+    getMyAlgorithmModels(user.id, user.username).then((items) => setAlgorithms(items.filter((item) => item.status !== 'draft' && isClinicalDomain(item) && readClinicalCard(item)))).catch(() => setAlgorithms([]))
   }, [user?.id, user?.username])
 
   useEffect(() => {
@@ -119,6 +123,17 @@ export function McpPackagingPage() {
     if (!name.trim() || !scenario.trim()) throw new Error('请填写服务名称和使用场景')
     if (!tools.length) throw new Error('至少确认一个工具')
     if (schemaError) throw new Error(schemaError)
+    for (const tool of tools) {
+      const properties = tool.input_schema.properties
+      if (!properties || typeof properties !== 'object' || Array.isArray(properties)) throw new Error(`${tool.name} 缺少输入字段规范`)
+      for (const [field, value] of Object.entries(properties)) {
+        const spec = value as Record<string, unknown>
+        if (!spec?.type || !spec?.description || String(spec.description).includes('请核对参数类型')) {
+          throw new Error(`${tool.name} 的 ${field} 需要明确类型和医学含义`)
+        }
+        if (spec.type === 'number' && !spec.unit) throw new Error(`${tool.name} 的 ${field} 需要在 Schema 中注明 unit`)
+      }
+    }
     const value = await saveMcpSpec(job.id, job.revision, {
       service_name: name.trim(), scenario: scenario.trim(),
       target_users: targetUsers.split(/[、,，]/).map((text) => text.trim()).filter(Boolean),
@@ -197,8 +212,8 @@ export function McpPackagingPage() {
   return (
     <div className="p-6 lg:p-8 max-w-6xl">
       <button className="text-sm text-blue-600 mb-4" onClick={() => navigate('/supplier/mcp')}>← 我的 MCP 服务</button>
-      <h1 className="text-2xl font-bold text-gray-900">MCP 微服务想定式封装</h1>
-      <p className="text-sm text-gray-500 mt-1">从已有算法或 Python 源码中选择实际能力，生成供智能助手调用的工具服务。</p>
+      <h1 className="text-2xl font-bold text-gray-900">发布为可调用临床服务</h1>
+      <p className="text-sm text-gray-500 mt-1">从已有临床模型或 Python 源码中选择实际能力，核对输入规范后生成工具服务。接口验证与临床验证分别记录。</p>
       <div className="flex flex-wrap gap-2 my-6" aria-label="封装步骤">
         {steps.map((step, index) => <button key={step} onClick={() => setActiveStep(index)} className={`px-3 py-2 rounded-lg text-sm ${activeStep === index ? 'bg-blue-600 text-white' : 'bg-white text-gray-600 border'}`}>{index + 1}. {step}</button>)}
       </div>
@@ -218,7 +233,7 @@ export function McpPackagingPage() {
 
         {activeStep === 1 && <>
           <h2 className="font-semibold text-lg">描述服务使用想定</h2>
-          <div className="bg-blue-50 rounded-xl p-4 space-y-2"><label className="block text-sm">用自然语言描述你想让智能助手如何使用这个算法<textarea value={intentMessage} onChange={(event) => setIntentMessage(event.target.value)} className="mt-1 block w-full border rounded-lg p-2 h-20 bg-white" placeholder="例如：让业务人员输入交易列表，得到每笔交易的异常评分" /></label><button disabled={busy || !job?.sourceName} onClick={suggest} className="border border-blue-600 text-blue-700 px-3 py-1.5 rounded-lg text-sm disabled:opacity-50">智能补全想定</button>{followUp && <p className="text-sm text-blue-800">{followUp}</p>}</div>
+          <div className="bg-blue-50 rounded-xl p-4 space-y-2"><label className="block text-sm">描述目标患者、预测时点、可用数据和结果含义<textarea value={intentMessage} onChange={(event) => setIntentMessage(event.target.value)} className="mt-1 block w-full border rounded-lg p-2 h-20 bg-white" placeholder="例如：面向成年住院患者，用入院时数据输出 30 天再入院风险，供研究评估" /></label><p className="text-xs text-blue-800">只提供字段结构和数据摘要，不输入原始病历。</p><button disabled={busy || !job?.sourceName} onClick={suggest} className="border border-blue-600 text-blue-700 px-3 py-1.5 rounded-lg text-sm disabled:opacity-50">智能补全想定</button>{followUp && <p className="text-sm text-blue-800">{followUp}</p>}</div>
           <label className="block text-sm">服务名称<input value={name} onChange={(event) => setName(event.target.value)} maxLength={100} disabled={!!job?.serviceId} className="mt-1 block w-full border rounded-lg p-2" placeholder="例如：异常交易评分服务" /></label>
           <label className="block text-sm">使用场景<textarea value={scenario} onChange={(event) => setScenario(event.target.value)} disabled={!!job?.serviceId} className="mt-1 block w-full border rounded-lg p-2 h-24" placeholder="谁在什么情况下调用哪些能力，以及希望获得什么结果" /></label>
           <label className="block text-sm">面向用户<input value={targetUsers} onChange={(event) => setTargetUsers(event.target.value)} disabled={!!job?.serviceId} className="mt-1 block w-full border rounded-lg p-2" placeholder="例如：业务分析人员、智能助手" /></label>
@@ -227,7 +242,7 @@ export function McpPackagingPage() {
 
         {activeStep === 2 && <>
           <h2 className="font-semibold text-lg">确认将暴露的工具</h2>
-          <p className="text-sm text-gray-500">以下函数由源码静态分析得出。请只勾选适合远程调用的能力，并核对参数类型；默认将参数暂列为字符串。</p>
+          <p className="text-sm text-gray-500">以下函数由源码静态分析得出。请核对每个输入的医学含义、类型、单位、允许范围和必填条件；默认参数仅是字符串占位，需要人工修订。缺失值、错误单位和不适用人群应明确拒绝或处理。</p>
           {!job?.candidates.length && <p className="text-sm text-amber-700">请先选择源码。</p>}
           {job?.candidates.map((candidate) => {
             const selected = tools.find((item) => item.entrypoint === candidate.entrypoint)
@@ -269,7 +284,7 @@ export function McpPackagingPage() {
             {job.serviceStatus === 'error' && <p className="text-sm text-red-700">容器部署失败，请检查服务部署日志。</p>}
             <button disabled={busy || !['pre_release_unrated', 'pre_release_pending', 'released'].includes(job.serviceStatus || '')} onClick={() => check(false)} className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm disabled:opacity-50">检查 MCP 连接和工具清单</button>
             {!!job.verifiedAt && <div className="space-y-3">
-              <p className="text-sm text-green-700">协议和工具清单已验证。可选择工具输入测试数据。</p>
+              <p className="text-sm text-green-700">协议和工具清单已验证，这仅说明接口可连接。请继续用合成数据测试正常输入、边界值、缺失值和错误单位；临床有效性需另行验证。</p>
               <select value={testTool} onChange={(event) => { setTestTool(event.target.value); setArgumentsJson('{}') }} className="border rounded-lg p-2 text-sm block w-full"><option value="">选择工具</option>{job.verifiedTools?.map((tool) => <option key={tool.name} value={tool.name}>{tool.name}</option>)}</select>
               {testTool && <pre className="text-xs bg-gray-50 border p-3 rounded-lg overflow-auto">{JSON.stringify(job.verifiedTools?.find((tool) => tool.name === testTool)?.inputSchema, null, 2)}</pre>}
               <label className="block text-sm">调用参数 JSON<textarea value={argumentsJson} onChange={(event) => setArgumentsJson(event.target.value)} className="font-mono text-xs border rounded-lg p-2 mt-1 block w-full h-32" /></label>

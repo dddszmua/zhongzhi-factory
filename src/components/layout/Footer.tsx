@@ -4,14 +4,13 @@ import { BLUE, PURPLE } from '@/lib/constants'
 export function Footer() {
   const links: Record<string, Array<{ label: string; to: string }>> = {
     产品: [
-      { label: 'AI算法市场', to: '/market' },
-      { label: '行业方案', to: '/market' },
-      { label: '定制开发', to: '/market' },
-      { label: '发布算法', to: '/supplier/create' },
+      { label: '临床算法目录', to: '/market' },
+      { label: '描述临床需求', to: '/demand' },
+      { label: '提交模型', to: '/supplier/create' },
     ],
     资源: [
       { label: '帮助中心', to: '/' },
-      { label: '案例库', to: '/market' },
+      { label: '临床可调用服务', to: '/mcp-market' },
     ],
     公司: [
       { label: '关于我们', to: '/' },
@@ -31,20 +30,20 @@ export function Footer() {
               >
                 众
               </div>
-              <span className="font-bold text-white text-base">众智工场</span>
+              <span className="font-bold text-white text-base">临床模型众智工场</span>
             </div>
             <p className="text-xs text-gray-500 leading-relaxed max-w-xs mb-5">
-              AI算法模型交易与交付平台。帮助业务人员找到、试用、定制适合的算法模型。
+              面向临床医生与医学研究团队的算法开发、验证和服务化平台。
             </p>
             <div className="flex gap-2">
               <Link to="/market" className="px-4 py-2 text-xs font-bold text-white rounded-lg" style={{ background: BLUE }}>
-                免费试用
+                浏览目录
               </Link>
               <Link
                 to="/supplier/create"
                 className="px-4 py-2 text-xs font-bold text-gray-300 rounded-lg border border-gray-700 hover:border-gray-500 transition-all"
               >
-                发布算法
+                提交模型
               </Link>
             </div>
           </div>

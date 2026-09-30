@@ -18,12 +18,12 @@ import { BLUE, PURPLE } from '@/lib/constants'
 
 const sidebarItems = [
   { icon: LayoutDashboard, label: '工作台', to: '/supplier' },
-  { icon: ShoppingBag, label: '我的算法商品', to: '/supplier/products' },
-  { icon: PlusCircle, label: '发布新算法', to: '/supplier/create' },
-  { icon: Boxes, label: '我的 MCP 服务', to: '/supplier/mcp' },
+  { icon: ShoppingBag, label: '我的临床模型', to: '/supplier/products' },
+  { icon: PlusCircle, label: '提交新模型', to: '/supplier/create' },
+  { icon: Boxes, label: '我的可调用服务', to: '/supplier/mcp' },
   { icon: FlaskConical, label: '在线试用配置', to: '/supplier/trial' },
   { icon: Bell, label: '咨询消息', to: '/messages' },
-  { icon: BadgeCheck, label: '评测认证', to: null },
+  { icon: BadgeCheck, label: '临床模型评估', to: '/supplier/evaluation' },
   { icon: ShoppingCart, label: '订单与交易', to: null },
   { icon: BookOpen, label: '案例与模板', to: null },
   { icon: LineChart, label: '数据统计', to: null },
@@ -51,8 +51,8 @@ export function SupplierLayout() {
               众
             </div>
             <div>
-              <div className="font-bold text-gray-900 text-sm leading-tight">众智工场</div>
-              <div className="text-[9px] text-gray-400 leading-tight">供应商中心</div>
+              <div className="font-bold text-gray-900 text-sm leading-tight">临床模型众智工场</div>
+              <div className="text-[9px] text-gray-400 leading-tight">研发工作台</div>
             </div>
           </button>
         </div>
@@ -107,7 +107,7 @@ export function SupplierLayout() {
           <div className="flex items-center gap-2 text-sm">
             <span className="text-gray-400">当前空间：</span>
             <button className="flex items-center gap-1 font-semibold text-gray-800 hover:text-blue-600 transition-colors">
-              算法商品空间 <ChevronDown size={14} />
+              临床研发空间 <ChevronDown size={14} />
             </button>
           </div>
           <div className="flex items-center gap-3">

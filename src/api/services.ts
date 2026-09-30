@@ -1,5 +1,6 @@
 import { apiClient } from './client'
-import { ALGORITHM_MODEL_TYPE, onlyAlgorithmModels, type BackendService } from '@/lib/mappers'
+import { onlyAlgorithmModels, type BackendService } from '@/lib/mappers'
+import { onlyClinicalListed } from '@/lib/clinical'
 
 type ListResponse = {
   status?: string
@@ -16,8 +17,9 @@ export async function filterServices(params: Record<string, string | number | un
 
 /** 算法市场专用：只拉 type=generated_algorithm */
 export async function filterAlgorithmModels(params: Record<string, string | number | undefined> = {}) {
-  const list = await filterServices({ ...params, type: ALGORITHM_MODEL_TYPE })
-  return onlyAlgorithmModels(list).filter((service) => service.status !== 'draft')
+  const res: ListResponse = await apiClient.get('/services/clinical-catalog', { params: { q: params.q } })
+  const list = res.services || []
+  return onlyClinicalListed(onlyAlgorithmModels(list))
 }
 
 export async function searchServices(keyword: string) {
@@ -26,7 +28,7 @@ export async function searchServices(keyword: string) {
 }
 
 export async function searchAlgorithmModels(keyword: string) {
-  return onlyAlgorithmModels(await searchServices(keyword)).filter((service) => service.status !== 'draft')
+  return filterAlgorithmModels({ q: keyword })
 }
 
 export async function smartSearch(params: {
@@ -49,7 +51,76 @@ export async function smartSearchAlgorithmModels(params: {
   function?: string
   requirement?: string
 }) {
-  return onlyAlgorithmModels(await smartSearch(params)).filter((service) => service.status !== 'draft')
+  return filterAlgorithmModels({ q: params.requirement || params.description || params.name || '' })
+}
+
+export async function getPublicClinicalServiceById(id: string) {
+  const res: ListResponse = await apiClient.get(`/services/clinical-catalog/${id}`)
+  return res.service as BackendService
+}
+
+export interface ClinicalAlgorithmArtifact {
+  serviceId: string
+  version: number
+  status: 'ready' | 'draft' | 'needs_configuration' | string
+  validationError?: string
+  publicTrialEnabled?: boolean
+  smokeInput?: Record<string, unknown>
+  source?: { reproductionMode?: boolean; referenceCheck?: ClinicalReferenceCheckResult }
+  spec: {
+    title?: string
+    description?: string
+    clinicalScope?: string
+    inputs: Array<{ name: string; label?: string; type: 'number' | 'integer' | 'string' | 'boolean'; unit?: string; minimum?: number; maximum?: number; description?: string; required?: boolean; options?: string[] }>
+    output?: { description?: string }
+  }
+}
+
+export interface ClinicalReferenceCheckResult {
+  passed: boolean
+  citation: string
+  expected: unknown
+  actual: unknown
+  artifactVersion: number
+  checkedAt: string
+}
+
+export async function checkClinicalReference(id: string, payload: { citation: string; inputs: Record<string, unknown>; expected: unknown; absoluteTolerance: number; relativeTolerance: number; units: Record<string, string> }): Promise<ClinicalReferenceCheckResult> {
+  const result = await apiClient.post(`/services/${id}/clinical-reference-check`, payload) as { referenceCheck: ClinicalReferenceCheckResult }
+  return result.referenceCheck
+}
+
+export async function getClinicalArtifact(id: string): Promise<ClinicalAlgorithmArtifact> {
+  const result = await apiClient.get(`/services/${id}/algorithm-artifact`) as { artifact: ClinicalAlgorithmArtifact }
+  return result.artifact
+}
+
+export async function runClinicalAlgorithm(id: string, inputs: Record<string, unknown>, version: number, units: Record<string, string>): Promise<{ result: unknown; version: number }> {
+  return apiClient.post(`/services/${id}/algorithm-run`, { inputs, version, units })
+}
+
+export async function setClinicalTrialEnabled(id: string, enabled: boolean): Promise<void> {
+  await apiClient.post(`/services/${id}/clinical-trial-policy`, { enabled })
+}
+
+export async function configureClinicalArtifact(id: string, spec: ClinicalAlgorithmArtifact['spec'], smokeInput: Record<string, unknown>): Promise<ClinicalAlgorithmArtifact> {
+  const result = await apiClient.post(`/services/${id}/clinical-artifact/configure`, { spec, smokeInput }) as { artifact: ClinicalAlgorithmArtifact }
+  return result.artifact
+}
+
+export type ClinicalReviewItem = BackendService & { referenceAssets?: Array<{ name: string; size: number; sha256: string }>; referenceCheck?: ClinicalReferenceCheckResult; reproductionMode?: boolean }
+
+export async function getClinicalReviewQueue(): Promise<ClinicalReviewItem[]> {
+  const result: ListResponse = await apiClient.get('/services/clinical-review-queue')
+  return (result.services || []) as ClinicalReviewItem[]
+}
+
+export async function reviewClinicalService(id: string, decision: 'approved' | 'rejected'): Promise<void> {
+  await apiClient.post(`/services/${id}/clinical-review`, { decision })
+}
+
+export async function downloadClinicalReference(id: string, index: number): Promise<Blob> {
+  return apiClient.get(`/services/${id}/clinical-reference/${index}`, { responseType: 'blob' }) as Promise<Blob>
 }
 
 export async function getServiceById(id: string) {

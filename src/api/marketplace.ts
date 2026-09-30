@@ -1,11 +1,12 @@
 import { apiClient } from './client'
 import { onlyAlgorithmModels, type BackendService } from '@/lib/mappers'
+import { onlyClinicalListed } from '@/lib/clinical'
 
 type ServiceListResponse = { services?: BackendService[] }
 
 export async function getInterestedAlgorithms() {
   const res: ServiceListResponse = await apiClient.get('/services/user/interested')
-  return onlyAlgorithmModels(res.services || [])
+  return onlyClinicalListed(onlyAlgorithmModels(res.services || []))
 }
 
 export async function addInterested(serviceId: string) {

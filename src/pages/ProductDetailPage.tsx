@@ -1,17 +1,17 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router'
-import { ArrowLeft, Heart, Play, UploadCloud } from 'lucide-react'
+import { ArrowLeft, Heart, Play } from 'lucide-react'
 import { toast } from 'sonner'
 import { NavBar } from '@/components/layout/NavBar'
 import { Footer } from '@/components/layout/Footer'
 import { Badge } from '@/components/ui/Badge'
 import { Btn } from '@/components/ui/Btn'
-import { BatchEvaluationPanel } from '@/components/product/BatchEvaluationPanel'
-import { getServiceById, trialInvoke } from '@/api/services'
+import { ClinicalTrialPanel } from '@/components/product/ClinicalTrialPanel'
+import { getPublicClinicalServiceById } from '@/api/services'
 import { addInterested, getInterestedAlgorithms, removeInterested, sendInquiry } from '@/api/marketplace'
 import { useAuth } from '@/auth/AuthContext'
 import { mapServiceToProduct, type AlgorithmProduct } from '@/lib/mappers'
-import { BLUE } from '@/lib/constants'
+import { isClinicalListed, readClinicalCard } from '@/lib/clinical'
 
 export function ProductDetailPage() {
   const { id } = useParams<{ id: string }>()
@@ -20,9 +20,6 @@ export function ProductDetailPage() {
   const { user, isAuthenticated } = useAuth()
   const [product, setProduct] = useState<AlgorithmProduct | null>(null)
   const [loading, setLoading] = useState(true)
-  const [inputText, setInputText] = useState('{\n  "sample": "请输入试用请求 JSON"\n}')
-  const [result, setResult] = useState<string>('')
-  const [running, setRunning] = useState(false)
   const [interested, setInterested] = useState(false)
   const [favoriteBusy, setFavoriteBusy] = useState(false)
   const [inquiry, setInquiry] = useState('')
@@ -35,13 +32,10 @@ export function ProductDetailPage() {
     ;(async () => {
       setLoading(true)
       try {
-        const svc = await getServiceById(id)
+        const svc = await getPublicClinicalServiceById(id)
         if (!cancelled) {
           const p = mapServiceToProduct(svc)
-          setProduct(p)
-          if (p.exampleMsg) {
-            setInputText(JSON.stringify(p.exampleMsg, null, 2))
-          }
+          setProduct(isClinicalListed(svc) ? p : null)
         }
       } catch (err) {
         if (!cancelled) toast.error(err instanceof Error ? err.message : '加载失败')
@@ -96,36 +90,6 @@ export function ProductDetailPage() {
     }
   }
 
-  async function runTrial() {
-    if (!product) return
-    if (!product.endpoint) {
-      toast.error('该算法尚未配置可访问地址，请联系供应商开启试用')
-      setResult('无法试用：服务端点未配置。供应商可在「在线试用配置」中部署服务。')
-      return
-    }
-    let payload: unknown = inputText
-    try {
-      payload = JSON.parse(inputText)
-    } catch {
-      // 按纯文本发送
-      payload = { text: inputText }
-    }
-    setRunning(true)
-    setResult('')
-    try {
-      const res = await trialInvoke(product.endpoint, payload, product.method)
-      setResult(typeof res.data === 'string' ? res.data : JSON.stringify(res.data, null, 2))
-      if (res.ok) toast.success('试用完成')
-      else toast.message(`服务返回状态 ${res.status}`)
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : '试用调用失败'
-      setResult(msg)
-      toast.error(msg)
-    } finally {
-      setRunning(false)
-    }
-  }
-
   return (
     <div className="min-h-screen bg-[#f8f9fc]" style={{ fontFamily: "'Plus Jakarta Sans', 'Inter', sans-serif" }}>
       <NavBar />
@@ -141,7 +105,7 @@ export function ProductDetailPage() {
           {loading ? (
             <div className="text-sm text-gray-400 py-20 text-center">加载中…</div>
           ) : !product ? (
-            <div className="text-sm text-gray-400 py-20 text-center">未找到该算法商品</div>
+            <div className="text-sm text-gray-400 py-20 text-center">该模型未进入临床公开目录</div>
           ) : (<>
             <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
               <div className="lg:col-span-3 space-y-5">
@@ -165,7 +129,7 @@ export function ProductDetailPage() {
                       <div className="text-sm font-semibold text-gray-800">{product.outputType}</div>
                     </div>
                     <div className="bg-gray-50 rounded-xl p-3">
-                      <div className="text-[11px] text-gray-400 mb-1">行业场景</div>
+                      <div className="text-[11px] text-gray-400 mb-1">临床领域</div>
                       <div className="text-sm font-semibold text-gray-800">{product.domainLabel}</div>
                     </div>
                     <div className="bg-gray-50 rounded-xl p-3">
@@ -192,6 +156,24 @@ export function ProductDetailPage() {
                     </Btn>
                   </div>
                 </div>
+                <section className="bg-white rounded-2xl border border-black/5 p-6" aria-label="临床模型说明卡">
+                  <h2 className="font-bold text-gray-900 mb-2">临床模型说明卡</h2>
+                  <p className="text-xs text-gray-500 mb-4">目录审核、代码运行和临床验证分别记录。接口可调用不代表模型通过临床验证。</p>
+                  <dl className="grid sm:grid-cols-2 gap-4 text-sm">
+                    {([
+                      ['临床任务', 'task'], ['专科场景', 'specialty'], ['适用人群', 'population'], ['不适用情况', 'exclusions'],
+                      ['输入字段', 'inputs'], ['计量单位', 'units'], ['缺失值处理', 'missing'], ['输出含义', 'output'],
+                      ['预测时间范围', 'horizon'], ['阈值依据', 'threshold'], ['数据来源', 'dataSource'], ['评估样本量', 'sampleSize'],
+                      ['验证方式', 'validation'], ['实际评估结果', 'results'], ['允许使用场景', 'intendedUse'],
+                      ['模型版本', 'version'], ['开发团队', 'team'], ['参考文献', 'references'], ['已知限制', 'limitations'],
+                    ] as const).map(([label, key]) => <div key={key}><dt className="text-gray-400 text-xs">{label}</dt><dd className="text-gray-800 mt-1 whitespace-pre-wrap">{readClinicalCard(product.raw)?.[key] || '尚未提供'}</dd></div>)}
+                  </dl>
+                  <div className="mt-5 grid sm:grid-cols-3 gap-3 text-xs">
+                    <p className="bg-blue-50 p-3 rounded-lg">在线运行：{product.trialable ? '样例运行已通过，可按权限试用' : '尚未开放试用'}</p>
+                    <p className="bg-blue-50 p-3 rounded-lg">接口验证：未提供独立报告</p>
+                    <p className="bg-blue-50 p-3 rounded-lg">临床数据验证：{readClinicalCard(product.raw)?.validation || '未提供'}</p>
+                  </div>
+                </section>
                 {(!user?.id || product.creatorId !== user.id) && <div className="bg-white rounded-2xl border border-black/5 p-6">
                   <h2 className="font-bold text-gray-900">咨询供应商</h2>
                   <p className="text-xs text-gray-500 mt-1 mb-3">描述业务需求或试用问题，供应商会在消息中心回复。</p>
@@ -201,39 +183,9 @@ export function ProductDetailPage() {
               </div>
 
               <div className="lg:col-span-2" id="trial-panel">
-                <div className={`bg-white rounded-2xl border border-black/5 p-5 sticky top-24 ${showTrial ? 'ring-2 ring-blue-100' : ''}`}>
-                  <div className="flex items-center gap-1.5 text-xs font-semibold text-gray-500 mb-3">
-                    <UploadCloud size={13} /> 在线试用
-                  </div>
-                  <p className="text-xs text-gray-400 mb-3 leading-relaxed">
-                    输入样例 JSON 或文本，调用供应商已配置的服务地址查看结果。首期不支持在线支付。
-                  </p>
-                  <textarea
-                    value={inputText}
-                    onChange={(e) => setInputText(e.target.value)}
-                    rows={8}
-                    className="w-full text-xs font-mono border border-gray-200 rounded-xl p-3 outline-none focus:border-blue-400 resize-y"
-                  />
-                  <button
-                    disabled={running}
-                    onClick={() => void runTrial()}
-                    className="w-full mt-3 py-2.5 text-sm font-bold text-white rounded-xl disabled:opacity-60"
-                    style={{ background: BLUE }}
-                  >
-                    {running ? '运行中…' : '▶ 运行试用'}
-                  </button>
-                  {result && (
-                    <pre className="mt-3 bg-gray-50 border border-gray-100 rounded-xl p-3 text-[11px] text-gray-700 overflow-auto max-h-64 whitespace-pre-wrap">
-                      {result}
-                    </pre>
-                  )}
-                  {!product.endpoint && (
-                    <p className="text-[11px] text-amber-600 mt-3">当前商品尚未配置可访问端点，试用可能不可用。</p>
-                  )}
-                </div>
+                <div className={showTrial ? 'ring-2 ring-blue-100 rounded-2xl' : ''}><ClinicalTrialPanel modelId={product.id} isAuthenticated={isAuthenticated} /></div>
               </div>
             </div>
-            <BatchEvaluationPanel endpoint={product.endpoint || ''} method={product.method || 'POST'} />
           </>)}
         </div>
       </main>

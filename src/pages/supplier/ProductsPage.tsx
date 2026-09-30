@@ -7,8 +7,9 @@ import { completenessOf, mapServices, type AlgorithmProduct } from '@/lib/mapper
 import { Badge } from '@/components/ui/Badge'
 import { Btn } from '@/components/ui/Btn'
 import { BLUE } from '@/lib/constants'
+import { isClinicalListed, readClinicalCard } from '@/lib/clinical'
 
-type FilterKey = 'all' | 'listed' | 'draft' | 'trialable'
+type FilterKey = 'all' | 'listed' | 'draft' | 'trialable' | 'unclassified'
 
 export function SupplierProductsPage() {
   const navigate = useNavigate()
@@ -51,6 +52,7 @@ export function SupplierProductsPage() {
       if (filter === 'listed' && p.productStatus !== 'listed') return false
       if (filter === 'draft' && p.productStatus !== 'draft') return false
       if (filter === 'trialable' && !p.trialable) return false
+      if (filter === 'unclassified' && (p.raw.domain === 'health' && readClinicalCard(p.raw))) return false
       if (keyword.trim()) {
         const q = keyword.trim().toLowerCase()
         return (
@@ -70,17 +72,18 @@ export function SupplierProductsPage() {
     { key: 'listed', label: '已上架' },
     { key: 'draft', label: '草稿' },
     { key: 'trialable', label: '可试用' },
+    { key: 'unclassified', label: '待归类历史模型' },
   ]
 
   return (
     <div className="p-6 lg:p-8">
       <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 mb-6">
         <div>
-          <h1 className="text-2xl font-extrabold text-gray-900">我的算法商品</h1>
-          <p className="text-sm text-gray-500 mt-1">管理已创建、已上架和待配置的算法商品。</p>
+          <h1 className="text-2xl font-extrabold text-gray-900">我的临床模型</h1>
+          <p className="text-sm text-gray-500 mt-1">历史模型需补充临床说明卡并完成审核，才会进入公开目录。</p>
         </div>
         <Btn onClick={() => navigate('/supplier/create')}>
-          <PlusCircle size={14} /> 发布新算法
+          <PlusCircle size={14} /> 提交临床模型
         </Btn>
       </div>
 
@@ -90,7 +93,7 @@ export function SupplierProductsPage() {
           <input
             value={keyword}
             onChange={(e) => setKeyword(e.target.value)}
-            placeholder="搜索算法名称、业务问题、输入类型或行业场景"
+            placeholder="搜索模型名称、临床问题或专科场景"
             className="flex-1 text-sm outline-none"
           />
         </div>
@@ -136,6 +139,7 @@ export function SupplierProductsPage() {
                     </Badge>
                   ))}
                   {p.trialable && <Badge color="blue">可试用</Badge>}
+                  <Badge color={isClinicalListed(p.raw) ? 'green' : 'amber'}>{isClinicalListed(p.raw) ? '临床目录已审核' : p.raw.domain !== 'health' || !readClinicalCard(p.raw) ? '待归类' : '临床目录待审核'}</Badge>
                 </div>
                 <div className="grid grid-cols-2 gap-2 mt-3 text-xs text-gray-500">
                   <div>输入：{p.inputType}</div>
@@ -145,13 +149,13 @@ export function SupplierProductsPage() {
                 </div>
                 <div className="flex gap-2 mt-4">
                   {p.status === 'draft' ? <button className="px-3 py-1.5 text-xs font-semibold text-blue-600 bg-blue-50 rounded-lg" onClick={() => navigate(`/supplier/create?draft=${p.id}`)}>继续编辑草稿</button> : <button className="px-3 py-1.5 text-xs font-semibold text-blue-600 bg-blue-50 rounded-lg" onClick={() => navigate(`/supplier/products/${p.id}/edit`)}>编辑商品</button>}
-                  <button
+                  {isClinicalListed(p.raw) && <button
                     className="px-3 py-1.5 text-xs font-semibold text-white rounded-lg"
                     style={{ background: BLUE }}
                     onClick={() => navigate(`/products/${p.id}`)}
                   >
-                    查看商品页
-                  </button>
+                    查看公开说明卡
+                  </button>}
                   {p.status !== 'draft' && <button
                     className="px-3 py-1.5 text-xs font-semibold text-blue-600 bg-blue-50 rounded-lg"
                     onClick={() => navigate(`/supplier/trial?id=${p.id}`)}
@@ -167,7 +171,7 @@ export function SupplierProductsPage() {
                   {p.status !== 'draft' && <button
                     className="px-3 py-1.5 text-xs font-semibold text-blue-600 bg-blue-50 rounded-lg"
                     onClick={() => navigate(`/supplier/mcp/create?sourceServiceId=${encodeURIComponent(p.id)}`)}
-                  >封装为 MCP 服务</button>}
+                  >发布为可调用服务</button>}
                 </div>
               </div>
             ))
