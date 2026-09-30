@@ -5,7 +5,6 @@ import {
   Upload,
   Play,
   SlidersHorizontal,
-  Store,
   ArrowRight,
   CheckCircle,
   Star,
@@ -18,7 +17,6 @@ import { NavBar } from '@/components/layout/NavBar'
 import { Footer } from '@/components/layout/Footer'
 import { ProductCard } from '@/components/product/ProductCard'
 import { filterAlgorithmModels, smartSearchAlgorithmModels } from '@/api/services'
-import { recommendViaAgent } from '@/api/agent'
 import { mapAlgorithmModels, type AlgorithmProduct } from '@/lib/mappers'
 import { BLUE, PURPLE, GREEN } from '@/lib/constants'
 
@@ -33,7 +31,7 @@ export function HomePage() {
     let cancelled = false
     ;(async () => {
       try {
-        const list = await filterAlgorithmModels({ page: 1, pageSize: 6 })
+        const list = await filterAlgorithmModels({ domain: 'health', page: 1, pageSize: 50 })
         if (!cancelled) setProducts(mapAlgorithmModels(list).slice(0, 6))
       } catch {
         if (!cancelled) setProducts([])
@@ -49,22 +47,13 @@ export function HomePage() {
   async function handleFind() {
     const q = query.trim()
     if (!q) {
-      toast.error('请先描述你的业务问题')
+      toast.error('请先描述临床问题')
       return
     }
     setFinding(true)
     try {
       // 主路径：后端智能检索
-      let list = await smartSearchAlgorithmModels({ requirement: q, description: q, domain: 'generic' })
-      if (!list.length) {
-        list = await smartSearchAlgorithmModels({ requirement: q, description: q, domain: 'aml' })
-      }
-      // 增强：尝试 Agent 推荐（失败不影响主流程）
-      try {
-        await recommendViaAgent(q)
-      } catch {
-        // ignore agent errors
-      }
+      const list = await smartSearchAlgorithmModels({ requirement: q, description: q, domain: 'health' })
       const mapped = mapAlgorithmModels(list)
       if (!mapped.length) {
         toast.message('未找到精确匹配，已为你打开算法市场')
@@ -82,7 +71,7 @@ export function HomePage() {
     }
   }
 
-  const chips = ['客户流失预测', '产品缺陷识别', '合同文档审核', 'Excel数据报告']
+  const chips = ['入院患者风险预测', '胸部影像辅助筛查', '检验指标分析', '随访预后评估']
 
   return (
     <div className="min-h-screen" style={{ fontFamily: "'Plus Jakarta Sans', 'Inter', system-ui, sans-serif" }}>
@@ -99,10 +88,10 @@ export function HomePage() {
             <div className="max-w-3xl mx-auto text-center mb-10">
               <div className="inline-flex items-center gap-2 px-3 py-1.5 bg-white rounded-full text-xs font-semibold text-blue-600 border border-blue-100 shadow-sm mb-6">
                 <Zap size={12} />
-                <span>AI 算法超市正式开放</span>
+                <span>临床医疗算法模型众智工场</span>
               </div>
               <h1 className="text-4xl lg:text-5xl xl:text-6xl font-extrabold text-gray-900 leading-tight mb-5" style={{ letterSpacing: '-0.02em' }}>
-                用业务语言找到、试用、
+                从临床问题出发，找到、验证、
                 <br />
                 <span
                   style={{
@@ -111,12 +100,12 @@ export function HomePage() {
                     WebkitTextFillColor: 'transparent',
                   }}
                 >
-                  定制
+                  开发
                 </span>{' '}
                 AI 算法模型
               </h1>
               <p className="text-base lg:text-lg text-gray-500 leading-relaxed max-w-2xl mx-auto">
-                面向企业业务人员、CIO 和产品经理的算法模型超市。无需写代码，只需描述业务问题，平台帮你匹配可运行、可试用的算法模型。
+                面向临床医生与医学研究团队，描述研究问题、查找已有模型，并核查模型的适用范围与验证证据。
               </p>
             </div>
             <div className="max-w-2xl mx-auto">
@@ -124,7 +113,7 @@ export function HomePage() {
                 <textarea
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
-                  placeholder="请描述你的业务问题，例如：我想预测哪些客户可能流失"
+                  placeholder="例如：用入院时可获得的数据预测成年住院患者 30 天内再入院风险"
                   rows={3}
                   className="w-full resize-none text-sm text-gray-700 placeholder-gray-400 outline-none leading-relaxed"
                 />
@@ -174,10 +163,9 @@ export function HomePage() {
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
               {[
-                { icon: Search, title: '找算法', desc: '用一句业务需求，匹配可试用的算法模型。', btn: '开始找算法', color: BLUE, bg: '#eef3ff', action: () => navigate('/market') },
-                { icon: Play, title: '试算法', desc: '上传样例数据，立即查看算法运行结果。', btn: '去试用', color: PURPLE, bg: '#f3f0ff', action: () => navigate('/market') },
-                { icon: SlidersHorizontal, title: '定制算法', desc: '基于现有模型，按你的业务场景对接。', btn: '浏览市场', color: '#0ea5e9', bg: '#e0f2fe', action: () => navigate('/market') },
-                { icon: Store, title: '发布算法', desc: '算法供应商可上架模型并配置在线试用。', btn: '发布模型', color: GREEN, bg: '#dcfce7', action: () => navigate('/supplier/create') },
+                { icon: Search, title: '找临床算法', desc: '按临床任务查找已有模型与验证证据。', btn: '浏览目录', color: BLUE, bg: '#eef3ff', action: () => navigate('/market') },
+                { icon: SlidersHorizontal, title: '描述临床需求', desc: '明确患者、使用时点、可用数据和结局。', btn: '填写需求', color: PURPLE, bg: '#f3f0ff', action: () => navigate('/demand') },
+                { icon: Play, title: '验证我的模型', desc: '在研发工作台整理模型、样例和评估结果。', btn: '进入工作台', color: GREEN, bg: '#dcfce7', action: () => navigate('/supplier') },
               ].map(({ icon: Icon, title, desc, btn, color, bg, action }) => (
                 <div
                   key={title}
@@ -204,8 +192,8 @@ export function HomePage() {
           <div className="max-w-[1440px] mx-auto px-6 lg:px-12">
             <div className="flex items-end justify-between mb-10">
               <div>
-                <h2 className="text-3xl font-bold text-gray-900">AI 算法市场</h2>
-                <p className="text-gray-500 mt-2 text-sm">像逛电商一样浏览、试用和对比算法模型。</p>
+                <h2 className="text-3xl font-bold text-gray-900">临床算法目录</h2>
+                <p className="text-gray-500 mt-2 text-sm">查看模型说明卡、适用人群与已有验证证据。</p>
               </div>
               <button
                 onClick={() => navigate('/market')}
@@ -218,7 +206,7 @@ export function HomePage() {
               <div className="text-center text-sm text-gray-400 py-16">正在加载算法商品…</div>
             ) : products.length === 0 ? (
               <div className="text-center text-sm text-gray-400 py-16">
-                暂无算法商品。请确认后端服务已启动，或先到供应商中心发布。
+                暂无完成临床目录审核的模型。
               </div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
@@ -234,14 +222,14 @@ export function HomePage() {
         <section className="py-16" style={{ background: 'linear-gradient(160deg, #f0f4ff 0%, #f8f9fc 100%)' }}>
           <div className="max-w-[1440px] mx-auto px-6 lg:px-12">
             <div className="text-center mb-12">
-              <h2 className="text-3xl font-bold text-gray-900">从业务需求到算法试用，只需 4 步</h2>
+              <h2 className="text-3xl font-bold text-gray-900">从临床问题到模型服务</h2>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-0">
               {[
-                { num: '01', icon: <CheckCircle size={22} className="text-blue-500" />, title: '说需求', desc: '用自然语言描述业务问题。' },
-                { num: '02', icon: <Search size={22} className="text-blue-500" />, title: '匹配算法', desc: '平台推荐可试用的算法模型。' },
-                { num: '03', icon: <Play size={22} className="text-blue-500" />, title: '在线试用', desc: '上传样例或输入数据，查看运行结果。' },
-                { num: '04', icon: <Star size={22} className="text-blue-500" />, title: '对接交付', desc: '联系供应商完成场景对接与交付。' },
+                { num: '01', icon: <CheckCircle size={22} className="text-blue-500" />, title: '明确问题', desc: '说明患者、预测时点与临床结局。' },
+                { num: '02', icon: <Search size={22} className="text-blue-500" />, title: '查找模型', desc: '核对输入字段、适用人群和限制。' },
+                { num: '03', icon: <Play size={22} className="text-blue-500" />, title: '数据验证', desc: '用独立数据评估模型效果。' },
+                { num: '04', icon: <Star size={22} className="text-blue-500" />, title: '服务封装', desc: '固定版本、输入输出与调用权限。' },
               ].map(({ num, icon, title, desc }, i, arr) => (
                 <div key={num} className="relative flex flex-col items-center text-center px-6 py-8">
                   {i < arr.length - 1 && (
@@ -262,15 +250,15 @@ export function HomePage() {
         {/* Supplier CTA */}
         <section className="py-20" style={{ background: `linear-gradient(135deg, ${BLUE} 0%, ${PURPLE} 100%)` }}>
           <div className="max-w-[1440px] mx-auto px-6 lg:px-12 text-center">
-            <h2 className="text-3xl font-bold text-white mb-3">让算法模型流通起来</h2>
+            <h2 className="text-3xl font-bold text-white mb-3">建设可核查的临床模型目录</h2>
             <p className="text-blue-100 text-sm max-w-xl mx-auto leading-relaxed mb-8">
-              高校团队、算法公司、行业专家都可以在平台发布算法模型，形成可试用、可交付的算法商品。
+              医学研究团队可提交模型、适用范围与验证资料，完成审核后进入公开目录。
             </p>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-5 mb-10 text-left">
               {[
-                { icon: Upload, title: '发布模型', desc: '用业务语言描述算法，配置输入输出与试用。' },
-                { icon: Shield, title: '开启试用', desc: '部署服务后，买家即可在线体验效果。' },
-                { icon: Star, title: '持续迭代', desc: '根据试用反馈完善商品与文档。' },
+                { icon: Upload, title: '提交模型', desc: '描述目标患者、输入字段与输出含义。' },
+                { icon: Shield, title: '记录证据', desc: '分别记录接口验证与临床数据验证。' },
+                { icon: Star, title: '持续迭代', desc: '按模型版本维护证据与已知限制。' },
               ].map(({ icon: Icon, title, desc }) => (
                 <div key={title} className="bg-white/10 backdrop-blur-sm rounded-2xl p-6 border border-white/20">
                   <div className="w-10 h-10 rounded-xl bg-white/20 flex items-center justify-center mb-3">
@@ -285,7 +273,7 @@ export function HomePage() {
               onClick={() => navigate('/supplier')}
               className="px-8 py-3 bg-white text-blue-600 font-bold rounded-xl hover:bg-blue-50 transition-all shadow-lg text-sm"
             >
-              成为算法供应商 →
+              进入研发工作台 →
             </button>
           </div>
         </section>

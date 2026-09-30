@@ -21,6 +21,8 @@ import { EditProductPage } from '@/pages/supplier/EditProductPage'
 import { GeneratedCodePage } from '@/pages/supplier/GeneratedCodePage'
 import { McpJobsPage } from '@/pages/supplier/McpJobsPage'
 import { McpPackagingPage } from '@/pages/supplier/McpPackagingPage'
+import { ClinicalEvaluationPage } from '@/pages/supplier/ClinicalEvaluationPage'
+import { ClinicalReviewPage } from '@/pages/supplier/ClinicalReviewPage'
 
 export default function App() {
   return (
@@ -52,9 +54,11 @@ export default function App() {
             <Route path="products/:id/code" element={<GeneratedCodePage />} />
             <Route path="create" element={<SupplierCreatePage />} />
             <Route path="trial" element={<SupplierTrialPage />} />
+            <Route path="review" element={<ClinicalReviewPage />} />
             <Route path="mcp" element={<McpJobsPage />} />
             <Route path="mcp/create" element={<McpPackagingPage />} />
             <Route path="mcp/jobs/:jobId" element={<McpPackagingPage />} />
+            <Route path="evaluation" element={<ClinicalEvaluationPage />} />
           </Route>
 
           <Route path="*" element={<Navigate to="/" replace />} />

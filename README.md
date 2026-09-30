@@ -1,8 +1,8 @@
-# 众智工场（Zhongzhi Factory）
+# 临床医疗算法模型众智工场
 
-众智工场是面向算法模型供需双方的独立网站。买家可以浏览算法市场与已发布的 MCP 服务，查看商品详情、收藏、咨询供应商和在线试用；供应商可以创建并续编草稿、编辑商品信息、查看及下载生成源码、回复咨询，配置试用服务，并将自有算法或 Python 源码封装为 MCP 微服务。网站还提供登录、注册和「帮我找算法」入口。订单、定价与平台认证尚未开放。
+本站面向临床医生与医学研究团队，提供临床算法目录、结构化需求描述、模型说明卡、浏览器本地的二分类验证，以及模型提交与 MCP 服务封装。公开目录仅展示具有临床说明卡且审核状态为批准的服务；历史服务默认待归类。详细实现和后端上线约束见[临床专站说明](docs/clinical-site.md)。
 
-这是一个独立的 React 单页应用，通过 HTTP 调用 `ioeb_backend` 的 `/api` 接口及可选的 `Micro-Agent` 智能体接口。仓库仅包含前端；后端及智能体需分别部署。默认开发代理和容器 Nginx 代理均指向 `https://fdueblab.cn`。草稿、消息和源码权限依赖配套的 `ioeb_backend` 更新，发布新网站前须先部署配套后端。
+这是一个独立的 React 单页应用，通过 HTTP 调用 `ioeb_backend` 的 `/api` 接口及可选的 `Micro-Agent` 智能体接口。仓库仅包含前端；后端及智能体需分别部署。默认开发代理和容器 Nginx 代理均指向 `https://fdueblab.cn`。**当前临床目录筛选只在前端执行，正式上线必须由后端实现目录审核与访问控制。**
 
 MCP 封装需要本仓库、配套 `ioeb_backend` 的 MCP 任务接口，以及 `Micro-Agent` 的结构化想定与内部验证接口同步部署。详细设计见 [MCP 封装方案](docs/mcp-packaging-design.md)。当前入口在供应商中心「我的 MCP 服务」及自有算法卡片「封装为 MCP 服务」；流程为选择源码、想定辅助、确认工具、生成下载、真实部署、协议及工具验证、提交平台审核。市场仅列出状态为 `released` 的 MCP 服务。
 
@@ -67,11 +67,23 @@ Copy-Item .env.example .env.development
 
 本地联调后端时，可在 `.env.development` 中设为 `http://127.0.0.1:5000` 和 `http://127.0.0.1:8010`。代理配置变更后重启开发服务。`VITE_` 变量会进入前端构建产物，不能放密码或密钥。
 
+## 体验论文 / 专利复现与在线试用
+
+此功能需要同时运行本仓库、`ioeb_backend` 和 `Micro-Agent` 的本次代码。浏览器开发代理分别指向后端 `5000` 端口和 Agent `8010` 端口。后端需能调用 Docker；先在 Docker 宿主机执行 `docker pull python:3.12-slim`。如果后端在 Compose 容器中，查明 `app_data` 的实际 Docker 卷名并在 `ioeb_backend/.env` 设置 `CLINICAL_UPLOADS_DOCKER_VOLUME`；后端直接运行在宿主机时无需设置该卷名。
+
+1. 登录后打开 `/supplier/create`，填写临床说明卡。在「生成依据与目标」选择「依据论文或专利复现」，上传 PDF/DOCX 主资料，检查提取预览，填写关键页码、公式及参数，然后生成、审阅代码并提交。
+2. 打开 `/supplier/trial?id=<提交后显示的模型 ID>`。若运行规范待配置，填写与 `main_process` 一致的规范及合成输入并保存。样例运行通过后可直接在同页的试用表单输入数据并查看真实输出。
+3. 复现模式还要在「原文结果对照」填写原文中的独立示例输入、预期输出及页码。只有对照通过的当前版本才可获目录批准。
+4. 有后端管理员权限的用户打开 `/supplier/review` 下载并检查参考资料、审核模型。审核通过且作者开启公开试用后，其他登录用户在 `/market` 进入详情页即可试用。付费模型还需完成购买。
+
+扫描件 OCR、训练权重和 GPU 推理尚不在当前轻量执行器范围内。详见 [论文 / 专利复现与在线试用设计](docs/paper-reproduction-and-online-trial.md)。
+
 ## 构建与验证
 
 ```powershell
 npm.cmd ci
 npm.cmd run typecheck
+npm.cmd run test
 npm.cmd run build
 npm.cmd run preview
 ```

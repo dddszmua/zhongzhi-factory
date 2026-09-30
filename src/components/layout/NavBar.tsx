@@ -10,12 +10,9 @@ export function NavBar() {
   const navigate = useNavigate()
 
   const navItems = [
-    { label: '找算法', to: '/demand' },
-    { label: 'AI算法市场', to: '/market' },
-    { label: 'MCP服务', to: '/mcp-market' },
-    { label: '行业方案', to: '/market' },
-    { label: '定制开发', to: '/market' },
-    { label: '案例库', to: '/market' },
+    { label: '找临床算法', to: '/market' },
+    { label: '描述临床需求', to: '/demand' },
+    { label: '临床可调用服务', to: '/mcp-market' },
   ]
 
   return (
@@ -29,8 +26,8 @@ export function NavBar() {
             众
           </div>
           <div>
-            <div className="font-bold text-gray-900 text-base leading-tight">众智工场</div>
-            <div className="text-[10px] text-gray-400 leading-tight">AI算法模型交易与交付平台</div>
+            <div className="font-bold text-gray-900 text-base leading-tight">临床模型众智工场</div>
+            <div className="text-[10px] text-gray-400 leading-tight">临床算法开发、验证与服务化</div>
           </div>
         </Link>
         <nav className="hidden lg:flex items-center gap-1">
@@ -56,7 +53,7 @@ export function NavBar() {
                 onClick={() => navigate('/supplier')}
                 className="px-4 py-2 text-sm border border-gray-200 rounded-lg text-gray-700 hover:bg-gray-50 font-medium transition-all"
               >
-                供应商中心
+                研发工作台
               </button>
               <button
                 onClick={() => void logout()}
@@ -77,7 +74,7 @@ export function NavBar() {
                 onClick={() => navigate('/supplier')}
                 className="px-4 py-2 text-sm border border-gray-200 rounded-lg text-gray-700 hover:bg-gray-50 font-medium transition-all"
               >
-                供应商中心
+                研发工作台
               </button>
             </>
           )}
@@ -86,7 +83,7 @@ export function NavBar() {
             className="px-4 py-2 text-sm text-white rounded-lg font-semibold transition-all hover:opacity-90 shadow-sm"
             style={{ background: BLUE }}
           >
-            免费试用
+            浏览目录
           </button>
         </div>
         <button className="lg:hidden p-2 text-gray-600" onClick={() => setMobileOpen(!mobileOpen)}>
@@ -108,7 +105,7 @@ export function NavBar() {
                 navigate(isAuthenticated ? '/supplier' : '/login')
               }}
             >
-              {isAuthenticated ? '供应商中心' : '登录'}
+              {isAuthenticated ? '研发工作台' : '登录'}
             </button>
             <button
               className="flex-1 py-2 text-sm text-white rounded-lg font-semibold"
@@ -118,7 +115,7 @@ export function NavBar() {
                 navigate('/market')
               }}
             >
-              免费试用
+              浏览目录
             </button>
           </div>
           {isAuthenticated && <div className="flex gap-5 text-sm text-blue-600"><Link to="/favorites" onClick={() => setMobileOpen(false)}>我的收藏</Link><Link to="/messages" onClick={() => setMobileOpen(false)}>消息中心</Link></div>}

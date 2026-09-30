@@ -25,6 +25,14 @@ export type AmlGenerateResult = {
   model_name?: string
   generated_code?: string
   code_filename?: string
+  algorithm_spec?: {
+    title?: string
+    description?: string
+    clinicalScope?: string
+    inputs?: Array<{ name: string; label?: string; type: 'number' | 'integer' | 'string' | 'boolean'; unit?: string; minimum?: number; maximum?: number; description?: string; required?: boolean; options?: string[] }>
+    output?: { description?: string }
+  }
+  smoke_input?: Record<string, unknown>
   model_summary?: {
     purpose?: string
     input_description?: string
@@ -49,6 +57,12 @@ export async function callScenarioIntake(formData: FormData): Promise<ScenarioIn
   return callAgentApi('/api/agent/aml_scenario_intake', formData)
 }
 
+export async function previewReference(file: File): Promise<{ filename: string; text: string; truncated: boolean }> {
+  const data = new FormData()
+  data.append('file', file)
+  return callAgentApi('/api/agent/reference_preview', data)
+}
+
 /** SSE 生成算法源码 */
 export function streamAutoGenerate(formData: FormData, callbacks: StreamAgentCallbacks) {
   return streamAgent('/api/agent/aml_auto_generate', formData, callbacks)
@@ -58,5 +72,5 @@ export function streamAutoGenerate(formData: FormData, callbacks: StreamAgentCal
 export async function uploadScenarioGenerated(formData: FormData) {
   return apiClient.post('/services/scenario-generated/upload', formData, {
     timeout: 120000,
-  }) as Promise<{ status?: string; message?: string; service?: { id?: string; name?: string } }>
+  }) as Promise<{ status?: string; message?: string; service?: { id?: string; name?: string; algorithmArtifact?: { status?: string; validationError?: string } } }>
 }

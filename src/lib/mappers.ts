@@ -35,6 +35,7 @@ export interface BackendService {
     popoverTitle?: string
   }
   norm?: Array<{ key?: string; score?: number }>
+  onlineUsage?: { supported?: boolean; canRun?: boolean; status?: string; reason?: string; version?: number; publicTrialEnabled?: boolean }
 }
 
 /**
@@ -124,7 +125,9 @@ export function mapServiceToProduct(svc: BackendService): AlgorithmProduct {
   const dLabel = domainLabel(svc.domain)
   const st = statusLabel(svc.status)
   const ps = productStatus(svc.status)
-  const trialable = DEPLOYED.has((svc.status || '').toLowerCase()) || Boolean(svc.url || svc.apiList?.[0]?.url)
+  const trialable = svc.type === ALGORITHM_MODEL_TYPE
+    ? svc.onlineUsage?.status === 'ready' && Boolean(svc.onlineUsage.publicTrialEnabled)
+    : DEPLOYED.has((svc.status || '').toLowerCase()) || Boolean(svc.url || svc.apiList?.[0]?.url)
   const badges: AlgorithmProduct['badges'] = []
 
   if (trialable) badges.push({ label: '可试用', color: 'blue' })
