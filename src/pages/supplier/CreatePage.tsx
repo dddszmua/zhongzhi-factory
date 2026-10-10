@@ -84,6 +84,7 @@ export function SupplierCreatePage() {
   const navigate = useNavigate()
   const [params] = useSearchParams()
   const draftId = params.get('draft') || ''
+  const initialRequirement = draftId ? '' : params.get('requirement') || ''
   const { user } = useAuth()
   const [step, setStep] = useState(0)
   const abortRef = useRef<AbortController | null>(null)
@@ -99,8 +100,9 @@ export function SupplierCreatePage() {
     unsuitable: '不用于未成年人、缺少或单位不明的肌酐结果，也不依据演示结果直接诊断、分期或调整药物剂量。',
     inputTypes: ['结构化临床数据'] as string[],
     outputTypes: ['预测结果'] as string[],
+    ...(initialRequirement ? { name: '', tagline: '', problem: initialRequirement, suitable: '', unsuitable: '', scenario: '' } : {}),
   })
-  const [clinicalCard, setClinicalCard] = useState<ClinicalCard>(CKD_EPI_DEFAULT_CLINICAL_CARD)
+  const [clinicalCard, setClinicalCard] = useState<ClinicalCard>(initialRequirement ? emptyClinicalCard : CKD_EPI_DEFAULT_CLINICAL_CARD)
 
   const [sourceMode, setSourceMode] = useState<SourceMode>(null)
   const [files, setFiles] = useState<File[]>([])
@@ -497,6 +499,7 @@ export function SupplierCreatePage() {
       </button>
 
       <div className="mb-6">
+        {params.get('attach') === '1' && <p className="mb-4 rounded-xl bg-blue-50 px-4 py-3 text-sm text-blue-700">请先补充临床信息，在第三步选择“依据论文或专利复现”并上传论文或规则材料。</p>}
         <h1 className="text-2xl font-extrabold text-gray-900">{draftId ? '继续编辑模型草稿' : '提交临床模型'}</h1>
         <p className="text-sm text-gray-500 mt-1">
           说明适用人群、输入输出、验证证据和使用限制。未审核模型不会进入公开目录。
@@ -570,6 +573,7 @@ export function SupplierCreatePage() {
                     </Field>
                     <Field label="适用场景">
                       <select className="input" value={form.scenario} onChange={(e) => setForm({ ...form, scenario: e.target.value })}>
+                        <option value="" disabled>请选择适用场景</option>
                         {SCENARIO_OPTIONS.map((o) => (
                           <option key={o} value={o}>
                             {o}

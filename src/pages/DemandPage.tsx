@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Link, useNavigate } from 'react-router'
+import { Link, useNavigate, useSearchParams } from 'react-router'
 import { toast } from 'sonner'
 import { NavBar } from '@/components/layout/NavBar'
 import { Footer } from '@/components/layout/Footer'
@@ -22,7 +22,8 @@ const initial = Object.fromEntries(fields.map(([key]) => [key, ''])) as Form
 
 export function DemandPage() {
   const navigate = useNavigate()
-  const [form, setForm] = useState<Form>(initial)
+  const [params] = useSearchParams()
+  const [form, setForm] = useState<Form>(() => ({ ...initial, outcome: params.get('requirement') || '' }))
 
   function find() {
     if (!form.population.trim() || !form.timepoint.trim() || !form.availableData.trim() || !form.outcome.trim()) {
