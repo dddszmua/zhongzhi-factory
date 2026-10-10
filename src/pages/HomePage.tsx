@@ -1,282 +1,175 @@
-import { useEffect, useState } from 'react'
-import { useNavigate } from 'react-router'
-import {
-  Search,
-  Upload,
-  Play,
-  SlidersHorizontal,
-  ArrowRight,
-  CheckCircle,
-  Star,
-  Zap,
-  Shield,
-  ChevronRight,
-} from 'lucide-react'
-import { toast } from 'sonner'
+import { useEffect, useRef, useState } from 'react'
+import { Link, useLocation, useNavigate } from 'react-router'
+import { ArrowRight, BarChart3, BookOpen, ClipboardCheck, Cloud, Cpu, Droplets, Eye, FileText, MessageCircle, Paperclip, RefreshCw, Search, Settings, Shield, TrendingUp, Users, WandSparkles, Wrench } from 'lucide-react'
 import { NavBar } from '@/components/layout/NavBar'
 import { Footer } from '@/components/layout/Footer'
-import { ProductCard } from '@/components/product/ProductCard'
-import { filterAlgorithmModels, smartSearchAlgorithmModels } from '@/api/services'
+import { filterAlgorithmModels } from '@/api/services'
 import { mapAlgorithmModels, type AlgorithmProduct } from '@/lib/mappers'
-import { BLUE, PURPLE, GREEN } from '@/lib/constants'
+import { readClinicalCard } from '@/lib/clinical'
+
+const categories = ['全部', '诊断与分诊辅助', '风险预测', '影像与病理', '检验与生理信号', '治疗决策支持', '随访与慢病', '临床文书', '科研建模']
+const examples = [
+  { name: '成人肾功能估算工具', description: '将相关指标整理为便于使用的估算工具。', input: '年龄、血清肌酐等所需指标', output: '估算结果与适用范围说明', tags: ['肾内科', '检验分析', '计算器'], category: '检验与生理信号', icon: Droplets, tone: 'blue' },
+  { name: '住院风险预测研究模型', description: '将研究中的预测方法转成结构化工具。', input: '脱敏临床指标', output: '风险预测结果与影响因素', tags: ['跨科室', '风险预测', '表单'], category: '风险预测', icon: TrendingUp, tone: 'purple' },
+  { name: '胸部影像辅助分析模型', description: '辅助呈现影像中的待关注区域。', input: '医学影像', output: '区域标注与分析提示', tags: ['影像科', '影像分析', '影像'], category: '影像与病理', icon: Eye, tone: 'cyan' },
+  { name: '病历结构化提取工具', description: '从脱敏病历中提取并整理关键字段。', input: '脱敏病历文本', output: '结构化字段与原文定位', tags: ['跨科室', '临床文书', '文本'], category: '临床文书', icon: FileText, tone: 'teal' },
+  { name: '慢病随访辅助工具', description: '汇总随访变化，整理待确认事项。', input: '随访记录与相关指标', output: '变化摘要与随访事项', tags: ['全科', '慢病管理', '对话'], category: '随访与慢病', icon: RefreshCw, tone: 'green' },
+  { name: '临床科研建模助手', description: '围绕研究目标组织数据分析与建模。', input: '脱敏表格与研究目标', output: '数据概况与评估报告', tags: ['临床科研', '科研建模', '数据分析'], category: '科研建模', icon: BarChart3, tone: 'purple' },
+]
+const starts = [
+  { icon: WandSparkles, tone: 'blue', title: '生成算法模型', description: '将临床经验、诊疗规则或论文方法转成模型原型。', action: '开始生成', to: '/supplier/create' },
+  { icon: Search, tone: 'purple', title: '使用算法模型', description: '按临床场景查找模型，了解输入要求与结果形式。', action: '查找模型', to: '#models' },
+  { icon: ClipboardCheck, tone: 'cyan', title: '评测与验证', description: '了解模型性能、适用人群及局限，完善使用依据。', action: '了解评测', to: '/supplier/evaluation' },
+  { icon: Cloud, tone: 'teal', title: '托管与转化', description: '支持在线托管、同行共享及研究成果转化。', action: '了解服务', to: '#services' },
+]
+const steps = [
+  { icon: MessageCircle, title: '描述需求', description: '说明临床问题、使用对象与预期结果。' },
+  { icon: Settings, title: '生成原型', description: '结合经验、规则或研究材料形成模型原型。' },
+  { icon: BarChart3, title: '评测验证', description: '了解性能、适用范围及局限。' },
+  { icon: Wrench, title: '封装托管', description: '配置使用界面和共享权限。' },
+  { icon: Users, title: '同行使用', description: '支持在线使用，根据反馈持续完善。' },
+]
+const support = [
+  { icon: ClipboardCheck, tone: 'blue', title: '专业评测', description: '整理性能指标、适用范围与评测报告。', to: '/supplier/evaluation' },
+  { icon: Cpu, tone: 'purple', title: '智能体封装', description: '将模型能力封装为适合任务的交互工具。', to: '/supplier/mcp' },
+  { icon: Cloud, tone: 'cyan', title: '在线托管', description: '支持持续访问、版本维护与权限配置。', to: '/supplier/trial' },
+  { icon: Shield, tone: 'teal', title: '知识产权分析', description: '沟通来源材料、权属问题和潜在风险。', to: '/demand' },
+  { icon: BookOpen, tone: 'green', title: '论文与专利材料支持', description: '整理方法说明、实验结果及相关申请材料。', to: '/demand' },
+  { icon: Users, tone: 'purple', title: '一对一转化服务', description: '围绕具体临床或科研需求开展沟通。', to: '/demand' },
+]
+
+function matchesCategory(product: AlgorithmProduct, category: string) {
+  if (category === '全部') return true
+  const keywords: Record<string, string[]> = {
+    '诊断与分诊辅助': ['诊断', '分诊', '筛查'], '风险预测': ['风险', '预测'], '影像与病理': ['影像', '病理'],
+    '检验与生理信号': ['检验', '生理', '肾', '心电'], '治疗决策支持': ['治疗', '决策', '用药'],
+    '随访与慢病': ['随访', '慢病', '预后'], '临床文书': ['病历', '文书', '文本'], '科研建模': ['科研', '建模', '研究'],
+  }
+  const text = [product.name, product.description, product.scenario, ...product.tags].join(' ')
+  return (keywords[category] || [category]).some((word) => text.includes(word))
+}
 
 export function HomePage() {
   const navigate = useNavigate()
+  const location = useLocation()
+  const inputRef = useRef<HTMLTextAreaElement>(null)
+  const [mode, setMode] = useState<'generate' | 'use'>('generate')
   const [query, setQuery] = useState('')
-  const [finding, setFinding] = useState(false)
+  const [search, setSearch] = useState('')
+  const [category, setCategory] = useState('全部')
   const [products, setProducts] = useState<AlgorithmProduct[]>([])
-  const [loadingMarket, setLoadingMarket] = useState(true)
+  const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState(false)
+  const [reload, setReload] = useState(0)
 
   useEffect(() => {
     let cancelled = false
-    ;(async () => {
-      try {
-        const list = await filterAlgorithmModels({ domain: 'health', page: 1, pageSize: 50 })
-        if (!cancelled) setProducts(mapAlgorithmModels(list).slice(0, 6))
-      } catch {
-        if (!cancelled) setProducts([])
-      } finally {
-        if (!cancelled) setLoadingMarket(false)
-      }
-    })()
-    return () => {
-      cancelled = true
-    }
-  }, [])
+    setLoading(true)
+    setLoadError(false)
+    filterAlgorithmModels({ domain: 'health', page: 1, pageSize: 50 })
+      .then((list) => { if (!cancelled) setProducts(mapAlgorithmModels(list)) })
+      .catch(() => { if (!cancelled) { setLoadError(true); setProducts([]) } })
+      .finally(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
+  }, [reload])
 
-  async function handleFind() {
-    const q = query.trim()
-    if (!q) {
-      toast.error('请先描述临床问题')
-      return
-    }
-    setFinding(true)
-    try {
-      // 主路径：后端智能检索
-      const list = await smartSearchAlgorithmModels({ requirement: q, description: q, domain: 'health' })
-      const mapped = mapAlgorithmModels(list)
-      if (!mapped.length) {
-        toast.message('未找到精确匹配，已为你打开算法市场')
-        navigate(`/market?q=${encodeURIComponent(q)}`)
-        return
-      }
-      sessionStorage.setItem('zzf_find_results', JSON.stringify(mapped.map((p) => p.id)))
-      navigate(`/market?q=${encodeURIComponent(q)}`)
-      toast.success(`找到 ${mapped.length} 个相关算法`)
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : '检索失败')
-      navigate(`/market?q=${encodeURIComponent(q)}`)
-    } finally {
-      setFinding(false)
-    }
+  useEffect(() => {
+    const id = location.hash.slice(1)
+    if (id) document.getElementById(id)?.scrollIntoView({ behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth' })
+  }, [location.hash])
+
+  function startGeneration(attach = false) {
+    const params = new URLSearchParams()
+    if (query.trim()) params.set('requirement', query.trim())
+    if (attach) params.set('attach', '1')
+    navigate(`/supplier/create${params.size ? `?${params}` : ''}`)
   }
 
-  const chips = ['入院患者风险预测', '胸部影像辅助筛查', '检验指标分析', '随访预后评估']
+  const term = search.trim().toLowerCase()
+  const visibleProducts = products.filter((p) => matchesCategory(p, category) && [p.name, p.description, ...p.tags].join(' ').toLowerCase().includes(term)).slice(0, 6)
+  const visibleExamples = examples.filter((p) => (category === '全部' || p.category === category) && [p.name, p.description, ...p.tags].join(' ').toLowerCase().includes(term))
 
   return (
-    <div className="min-h-screen" style={{ fontFamily: "'Plus Jakarta Sans', 'Inter', system-ui, sans-serif" }}>
+    <div className="clinical-home">
       <NavBar />
       <main>
-        {/* Hero */}
-        <section
-          className="relative pt-32 pb-20 overflow-hidden"
-          style={{ background: 'linear-gradient(160deg, #eef3ff 0%, #f8f9fc 40%, #fdf0ff 100%)' }}
-        >
-          <div className="absolute top-0 left-1/4 w-96 h-96 rounded-full opacity-20 blur-3xl pointer-events-none" style={{ background: BLUE }} />
-          <div className="absolute top-20 right-1/4 w-72 h-72 rounded-full opacity-15 blur-3xl pointer-events-none" style={{ background: PURPLE }} />
-          <div className="max-w-[1440px] mx-auto px-6 lg:px-12 relative">
-            <div className="max-w-3xl mx-auto text-center mb-10">
-              <div className="inline-flex items-center gap-2 px-3 py-1.5 bg-white rounded-full text-xs font-semibold text-blue-600 border border-blue-100 shadow-sm mb-6">
-                <Zap size={12} />
-                <span>临床医疗算法模型众智工场</span>
+        <section className="home-hero" id="home">
+          <div className="home-container">
+            <div className="hero-eyebrow">临床经验与科研成果转化</div>
+            <h1>让临床经验与研究成果<br />成为<span>可使用的算法模型</span></h1>
+            <p className="hero-description">描述临床需求，结合论文、规则与脱敏数据，生成算法模型原型；通过评测与在线<br className="desktop-break" />托管，让专业经验服务更多同行。</p>
+            <div className="hero-composer">
+              <div className="composer-tabs" role="tablist" aria-label="选择模型使用方式">
+                <button id="generate-tab" role="tab" aria-selected={mode === 'generate'} aria-controls="composer-panel" tabIndex={mode === 'generate' ? 0 : -1} onKeyDown={(e) => { if (e.key === 'ArrowRight') { setMode('use'); document.getElementById('use-tab')?.focus() } }} onClick={() => setMode('generate')}>生成算法模型</button>
+                <button id="use-tab" role="tab" aria-selected={mode === 'use'} aria-controls="composer-panel" tabIndex={mode === 'use' ? 0 : -1} onKeyDown={(e) => { if (e.key === 'ArrowLeft') { setMode('generate'); document.getElementById('generate-tab')?.focus() } }} onClick={() => setMode('use')}>使用算法模型</button>
               </div>
-              <h1 className="text-4xl lg:text-5xl xl:text-6xl font-extrabold text-gray-900 leading-tight mb-5" style={{ letterSpacing: '-0.02em' }}>
-                从临床问题出发，找到、验证、
-                <br />
-                <span
-                  style={{
-                    background: `linear-gradient(90deg, ${BLUE}, ${PURPLE})`,
-                    WebkitBackgroundClip: 'text',
-                    WebkitTextFillColor: 'transparent',
-                  }}
-                >
-                  开发
-                </span>{' '}
-                AI 算法模型
-              </h1>
-              <p className="text-base lg:text-lg text-gray-500 leading-relaxed max-w-2xl mx-auto">
-                面向临床医生与医学研究团队，描述研究问题、查找已有模型，并核查模型的适用范围与验证证据。
-              </p>
-            </div>
-            <div className="max-w-2xl mx-auto">
-              <div className="bg-white rounded-2xl shadow-xl border border-black/5 p-4">
-                <textarea
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
-                  placeholder="例如：用入院时可获得的数据预测成年住院患者 30 天内再入院风险"
-                  rows={3}
-                  className="w-full resize-none text-sm text-gray-700 placeholder-gray-400 outline-none leading-relaxed"
-                />
-                <div className="flex items-center justify-between mt-3 pt-3 border-t border-gray-100">
-                  <button
-                    type="button"
-                    onClick={() => navigate('/market')}
-                    className="flex items-center gap-2 text-sm text-gray-500 hover:text-blue-600 px-3 py-1.5 rounded-lg hover:bg-blue-50 transition-all font-medium"
-                  >
-                    <Upload size={15} />
-                    <span>去市场试用</span>
+              <form id="composer-panel" role="tabpanel" aria-labelledby={mode === 'generate' ? 'generate-tab' : 'use-tab'} onSubmit={(e) => { e.preventDefault(); if (mode === 'generate') startGeneration(); else navigate(`/market${query.trim() ? `?q=${encodeURIComponent(query.trim())}` : ''}`) }}>
+                <textarea ref={inputRef} aria-label={mode === 'generate' ? '描述临床问题' : '描述要查找的模型'} value={query} onChange={(e) => setQuery(e.target.value)} maxLength={2000} placeholder={mode === 'generate' ? '请描述您想解决的临床问题，例如：将论文中的风险预测方法转成可供本科室使用的在线工具。' : '搜索模型名称或描述使用场景，例如：成人肾功能估算、住院风险预测。'} />
+                <div className="composer-actions">
+                  <button type="button" className="attachment-link" onClick={() => mode === 'generate' ? startGeneration(true) : navigate('/market')}>
+                    {mode === 'generate' ? <Paperclip size={18} /> : <Search size={18} />}{mode === 'generate' ? '添加论文或规则材料' : '浏览全部临床模型'}
                   </button>
-                  <button
-                    type="button"
-                    disabled={finding}
-                    onClick={() => void handleFind()}
-                    className="flex items-center gap-2 px-5 py-2 text-sm text-white font-semibold rounded-xl transition-all hover:opacity-90 shadow-md disabled:opacity-60"
-                    style={{ background: `linear-gradient(90deg, ${BLUE}, ${PURPLE})` }}
-                  >
-                    <Search size={15} />
-                    {finding ? '匹配中…' : '帮我找算法'}
-                  </button>
+                  <button className="home-button" type="submit">{mode === 'generate' ? '开始生成' : '查找模型'}</button>
                 </div>
-              </div>
-              <div className="flex flex-wrap items-center justify-center gap-2 mt-4">
-                <span className="text-xs text-gray-400">快速体验：</span>
-                {chips.map((chip) => (
-                  <button
-                    key={chip}
-                    onClick={() => setQuery(chip)}
-                    className="px-3 py-1.5 text-xs font-medium bg-white border border-gray-200 rounded-full text-gray-600 hover:border-blue-300 hover:text-blue-600 hover:bg-blue-50 transition-all shadow-sm"
-                  >
-                    {chip}
-                  </button>
-                ))}
-              </div>
+              </form>
             </div>
+            <p className="hero-note">支持临床经验、论文方法与脱敏数据，生成后按用途完成评测。</p>
+            <div className="hero-chips">{['临床评分', '风险预测', '影像分析', '随访管理', '科研建模'].map((item) => <button key={item} onClick={() => { setQuery(item); inputRef.current?.focus() }}>{item}</button>)}</div>
           </div>
         </section>
 
-        {/* Quick actions */}
-        <section className="py-16 bg-white">
-          <div className="max-w-[1440px] mx-auto px-6 lg:px-12">
-            <div className="text-center mb-10">
-              <h2 className="text-3xl font-bold text-gray-900">你想先做什么？</h2>
-              <p className="text-gray-500 mt-2 text-sm">选择你当前的目标，快速开始</p>
-            </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
-              {[
-                { icon: Search, title: '找临床算法', desc: '按临床任务查找已有模型与验证证据。', btn: '浏览目录', color: BLUE, bg: '#eef3ff', action: () => navigate('/market') },
-                { icon: SlidersHorizontal, title: '描述临床需求', desc: '明确患者、使用时点、可用数据和结局。', btn: '填写需求', color: PURPLE, bg: '#f3f0ff', action: () => navigate('/demand') },
-                { icon: Play, title: '验证我的模型', desc: '在研发工作台整理模型、样例和评估结果。', btn: '进入工作台', color: GREEN, bg: '#dcfce7', action: () => navigate('/supplier') },
-              ].map(({ icon: Icon, title, desc, btn, color, bg, action }) => (
-                <div
-                  key={title}
-                  className="group relative bg-white border border-black/5 rounded-2xl p-6 hover:shadow-lg hover:-translate-y-1 transition-all duration-200 cursor-pointer overflow-hidden"
-                  onClick={action}
-                >
-                  <div className="absolute top-0 right-0 w-24 h-24 rounded-full opacity-30 -translate-y-8 translate-x-8" style={{ background: bg }} />
-                  <div className="w-12 h-12 rounded-xl flex items-center justify-center mb-4 relative" style={{ background: bg }}>
-                    <Icon size={22} style={{ color }} />
-                  </div>
-                  <h3 className="font-bold text-lg text-gray-900 mb-2">{title}</h3>
-                  <p className="text-sm text-gray-500 leading-relaxed mb-5">{desc}</p>
-                  <span className="flex items-center gap-1.5 text-sm font-semibold transition-all group-hover:gap-2.5" style={{ color }}>
-                    {btn} <ArrowRight size={14} />
-                  </span>
-                </div>
-              ))}
-            </div>
+        <section className="home-section home-starts">
+          <div className="home-container">
+            <div className="section-heading"><h2>从临床问题出发，选择您的起点</h2><p>创建自己的模型，也可以从已有工具开始。</p></div>
+            <div className="start-grid">{starts.map(({ icon: Icon, ...item }) => <Link className="start-card" to={item.to} key={item.title}><span className={`home-icon tone-${item.tone}`}><Icon size={26} /></span><h3>{item.title}</h3><p>{item.description}</p><span className="card-action">{item.action}<ArrowRight size={16} /></span></Link>)}</div>
           </div>
         </section>
 
-        {/* Market preview */}
-        <section className="py-16" style={{ background: '#f8f9fc' }}>
-          <div className="max-w-[1440px] mx-auto px-6 lg:px-12">
-            <div className="flex items-end justify-between mb-10">
-              <div>
-                <h2 className="text-3xl font-bold text-gray-900">临床算法目录</h2>
-                <p className="text-gray-500 mt-2 text-sm">查看模型说明卡、适用人群与已有验证证据。</p>
+        <section className="home-section home-catalog" id="models">
+          <div className="home-container">
+            <div className="section-heading"><h2>找到适合临床场景的算法模型</h2><p>了解模型用途、输入要求与结果形式，从具体问题开始。</p></div>
+            <label className="catalog-search"><Search size={20} /><input aria-label="搜索临床模型" placeholder="搜索模型名称、场景或标签" value={search} onChange={(e) => setSearch(e.target.value)} /></label>
+            <div className="catalog-filters" aria-label="模型分类">{categories.map((item) => <button key={item} aria-pressed={category === item} onClick={() => setCategory(item)}>{item}</button>)}</div>
+            {loading ? <div className="catalog-state" role="status">正在加载临床模型…</div> : <>
+              {products.length === 0 && <p className="catalog-notice" role="status">{loadError ? '临床目录暂时无法加载。以下为应用场景示例。' : '当前暂无已审核模型，以下为应用场景示例。'}{loadError && <button onClick={() => setReload((n) => n + 1)}>重新加载</button>}</p>}
+              <div className="model-grid">
+                {products.length > 0 ? visibleProducts.map((p) => <article className="home-model-card" key={p.id}>
+                  <div className="model-heading"><span className="home-icon tone-blue"><Cpu size={23} /></span><div><h3>{p.name}</h3><p>{p.description}</p></div></div>
+                  <div className="model-io"><p><span>输入</span>{readClinicalCard(p.raw)?.inputs || p.inputType}</p><p><span>输出</span>{readClinicalCard(p.raw)?.output || p.outputType}</p></div>
+                  <div className="model-tags">{p.tags.slice(0, 3).map((tag, i) => <span key={`${tag}-${i}`}>{tag}</span>)}</div>
+                  <div className="model-actions"><Link className="home-button" to={`/products/${p.id}${p.trialable ? '?trial=1' : ''}`}>{p.trialable ? '在线使用' : '查看模型'}</Link><Link className="home-button outline" to={`/products/${p.id}`}>了解模型</Link></div>
+                </article>) : visibleExamples.map(({ icon: Icon, ...p }) => <article className="home-model-card" key={p.name}>
+                  <div className="model-heading"><span className={`home-icon tone-${p.tone}`}><Icon size={23} /></span><div><h3>{p.name}<span className="example-badge">示例</span></h3><p>{p.description}</p></div></div>
+                  <div className="model-io"><p><span>输入</span>{p.input}</p><p><span>输出</span>{p.output}</p></div>
+                  <div className="model-tags">{p.tags.map((tag) => <span key={tag}>{tag}</span>)}</div>
+                  <div className="model-actions"><Link className="home-button" to={`/market?q=${encodeURIComponent(p.tags[1])}`}>查找同类模型</Link><Link className="home-button outline" to={`/demand?requirement=${encodeURIComponent(p.name)}`}>描述我的需求</Link></div>
+                </article>)}
               </div>
-              <button
-                onClick={() => navigate('/market')}
-                className="hidden lg:flex items-center gap-1.5 text-sm font-semibold text-blue-600 hover:text-blue-700 transition-colors"
-              >
-                查看全部 <ChevronRight size={16} />
-              </button>
-            </div>
-            {loadingMarket ? (
-              <div className="text-center text-sm text-gray-400 py-16">正在加载算法商品…</div>
-            ) : products.length === 0 ? (
-              <div className="text-center text-sm text-gray-400 py-16">
-                暂无完成临床目录审核的模型。
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
-                {products.map((p) => (
-                  <ProductCard key={p.id} product={p} />
-                ))}
-              </div>
-            )}
+              {(products.length ? visibleProducts : visibleExamples).length === 0 && <div className="catalog-state">没有符合当前条件的模型。<button onClick={() => { setCategory('全部'); setSearch('') }}>清除筛选</button></div>}
+              <div className="catalog-more"><Link to="/market">浏览全部临床模型<ArrowRight size={17} /></Link></div>
+            </>}
           </div>
         </section>
 
-        {/* How it works */}
-        <section className="py-16" style={{ background: 'linear-gradient(160deg, #f0f4ff 0%, #f8f9fc 100%)' }}>
-          <div className="max-w-[1440px] mx-auto px-6 lg:px-12">
-            <div className="text-center mb-12">
-              <h2 className="text-3xl font-bold text-gray-900">从临床问题到模型服务</h2>
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-0">
-              {[
-                { num: '01', icon: <CheckCircle size={22} className="text-blue-500" />, title: '明确问题', desc: '说明患者、预测时点与临床结局。' },
-                { num: '02', icon: <Search size={22} className="text-blue-500" />, title: '查找模型', desc: '核对输入字段、适用人群和限制。' },
-                { num: '03', icon: <Play size={22} className="text-blue-500" />, title: '数据验证', desc: '用独立数据评估模型效果。' },
-                { num: '04', icon: <Star size={22} className="text-blue-500" />, title: '服务封装', desc: '固定版本、输入输出与调用权限。' },
-              ].map(({ num, icon, title, desc }, i, arr) => (
-                <div key={num} className="relative flex flex-col items-center text-center px-6 py-8">
-                  {i < arr.length - 1 && (
-                    <div className="hidden xl:block absolute top-12 right-0 w-1/2 h-px border-t-2 border-dashed border-blue-200 translate-x-1/2" />
-                  )}
-                  <div className="w-16 h-16 rounded-2xl flex items-center justify-center mb-4 shadow-sm bg-white border border-black/5 relative z-10">
-                    {icon}
-                  </div>
-                  <div className="text-xs font-bold text-blue-400 mb-1 tracking-widest">{num}</div>
-                  <h3 className="font-bold text-gray-900 text-lg mb-2">{title}</h3>
-                  <p className="text-sm text-gray-500 leading-relaxed">{desc}</p>
-                </div>
-              ))}
-            </div>
+        <section className="home-section" id="value"><div className="home-container">
+          <div className="section-heading"><h2>让经验可以共享，让研究可以应用</h2></div>
+          <div className="value-grid">
+            <article className="value-card"><h3>把临床经验变成同行可用的工具</h3><p>将资深医生的经验与诊疗规则整理为算法工具，经评测和权限设置后，支持在科室、医院或医联体内共享。</p><div className="value-flow"><span>经验与规则</span><ArrowRight size={16} /><span>算法工具</span><ArrowRight size={16} /><span>同行共享</span></div><Link className="home-button" to="/supplier/create">转化我的临床经验</Link></article>
+            <article className="value-card purple"><h3>把研究成果变成可交付的模型</h3><p>围绕论文方法与研究数据开展模型复现、评测和封装，衔接论文材料整理、知识产权分析及授权转化。</p><div className="value-flow"><span>论文与数据</span><ArrowRight size={16} /><span>模型与评测</span><ArrowRight size={16} /><span>成果转化</span></div><Link className="home-button" to="/supplier/create?attach=1">转化我的研究成果</Link></article>
           </div>
-        </section>
+        </div></section>
 
-        {/* Supplier CTA */}
-        <section className="py-20" style={{ background: `linear-gradient(135deg, ${BLUE} 0%, ${PURPLE} 100%)` }}>
-          <div className="max-w-[1440px] mx-auto px-6 lg:px-12 text-center">
-            <h2 className="text-3xl font-bold text-white mb-3">建设可核查的临床模型目录</h2>
-            <p className="text-blue-100 text-sm max-w-xl mx-auto leading-relaxed mb-8">
-              医学研究团队可提交模型、适用范围与验证资料，完成审核后进入公开目录。
-            </p>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-5 mb-10 text-left">
-              {[
-                { icon: Upload, title: '提交模型', desc: '描述目标患者、输入字段与输出含义。' },
-                { icon: Shield, title: '记录证据', desc: '分别记录接口验证与临床数据验证。' },
-                { icon: Star, title: '持续迭代', desc: '按模型版本维护证据与已知限制。' },
-              ].map(({ icon: Icon, title, desc }) => (
-                <div key={title} className="bg-white/10 backdrop-blur-sm rounded-2xl p-6 border border-white/20">
-                  <div className="w-10 h-10 rounded-xl bg-white/20 flex items-center justify-center mb-3">
-                    <Icon size={18} className="text-white" />
-                  </div>
-                  <h3 className="font-bold text-white text-base mb-2">{title}</h3>
-                  <p className="text-blue-100 text-sm leading-relaxed">{desc}</p>
-                </div>
-              ))}
-            </div>
-            <button
-              onClick={() => navigate('/supplier')}
-              className="px-8 py-3 bg-white text-blue-600 font-bold rounded-xl hover:bg-blue-50 transition-all shadow-lg text-sm"
-            >
-              进入研发工作台 →
-            </button>
-          </div>
-        </section>
+        <section className="home-section home-workflow" id="workflow"><div className="home-container">
+          <div className="section-heading"><h2>从临床需求到模型使用</h2></div>
+          <div className="workflow-grid">{steps.map(({ icon: Icon, title, description }, i) => <div className="workflow-step" key={title}><span className="workflow-icon"><Icon size={29} /></span><span className="step-number">0{i + 1}</span><h3>{title}</h3><p>{description}</p></div>)}</div>
+        </div></section>
+
+        <section className="home-section" id="services"><div className="home-container">
+          <div className="section-heading"><h2>从模型原型，走向可交付成果</h2><p>围绕模型质量、使用方式与研究转化，提供配套支持。</p></div>
+          <div className="support-grid">{support.map(({ icon: Icon, ...item }) => <Link className="support-card" to={item.to} key={item.title}><span className={`home-icon tone-${item.tone}`}><Icon size={23} /></span><div><h3>{item.title}</h3><p>{item.description}</p></div></Link>)}</div>
+        </div></section>
+
+        <section className="home-cta"><div className="home-container"><h2>让您的专业经验，服务更多临床同行</h2><p>面向临床医生、科研团队与医疗机构，探索算法模型的生成、共享与转化。</p><div><Link className="home-button cta-outline" to="/demand">描述我的需求</Link><Link className="home-button cta-white" to="#services">了解合作方式</Link></div></div></section>
       </main>
       <Footer />
     </div>
