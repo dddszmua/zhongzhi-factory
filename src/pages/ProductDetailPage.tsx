@@ -183,7 +183,7 @@ export function ProductDetailPage() {
               </div>
 
               <div className="lg:col-span-2" id="trial-panel">
-                <div className={showTrial ? 'ring-2 ring-blue-100 rounded-2xl' : ''}><ClinicalTrialPanel modelId={product.id} isAuthenticated={isAuthenticated} /></div>
+                <div className={showTrial ? 'ring-2 ring-blue-100 rounded-2xl' : ''}><ClinicalTrialPanel modelId={product.id} isAuthenticated={isAuthenticated} canRun={product.raw.onlineUsage?.canRun} unavailableReason={product.raw.onlineUsage?.reason} /></div>
               </div>
             </div>
           </>)}

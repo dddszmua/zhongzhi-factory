@@ -69,7 +69,7 @@ Copy-Item .env.example .env.development
 
 ## 体验论文 / 专利复现与在线试用
 
-此功能需要同时运行本仓库、`ioeb_backend` 和 `Micro-Agent` 的本次代码。浏览器开发代理分别指向后端 `5000` 端口和 Agent `8010` 端口。后端需能调用 Docker；先在 Docker 宿主机执行 `docker pull python:3.12-slim`。如果后端在 Compose 容器中，查明 `app_data` 的实际 Docker 卷名并在 `ioeb_backend/.env` 设置 `CLINICAL_UPLOADS_DOCKER_VOLUME`；后端直接运行在宿主机时无需设置该卷名。
+此功能需要同时运行本仓库、`ioeb_backend` 和 `Micro-Agent` 的本次代码。浏览器开发代理分别指向后端 `5000` 端口和 Agent `8010` 端口。后端需能调用 Docker；先在 Docker 宿主机执行 `docker pull python:3.12-slim`。在线试用执行器只向受限容器传入当前模型的源码和本次输入，不挂载上传目录，因此无需配置 `CLINICAL_UPLOADS_DOCKER_VOLUME`。
 
 1. 登录后打开 `/supplier/create`，填写临床说明卡。在「生成依据与目标」选择「依据论文或专利复现」，上传 PDF/DOCX 主资料，检查提取预览，填写关键页码、公式及参数，然后生成、审阅代码并提交。
 2. 打开 `/supplier/trial?id=<提交后显示的模型 ID>`。若运行规范待配置，填写与 `main_process` 一致的规范及合成输入并保存。样例运行通过后可直接在同页的试用表单输入数据并查看真实输出。

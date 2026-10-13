@@ -226,7 +226,7 @@ export function completenessOf(product: AlgorithmProduct) {
   const checks = [
     { key: 'basic', label: '基础信息已填写', done: Boolean(product.name && product.description) },
     { key: 'io', label: '输入输出已配置', done: Boolean(product.inputType && product.outputType) },
-    { key: 'trial', label: '在线试用已开启', done: product.trialable || product.productStatus === 'listed' },
+    { key: 'trial', label: '在线试用已开启', done: product.trialable },
   ]
   const doneCount = checks.filter((c) => c.done).length
   return { checks, doneCount, total: checks.length, percent: Math.round((doneCount / checks.length) * 100) }

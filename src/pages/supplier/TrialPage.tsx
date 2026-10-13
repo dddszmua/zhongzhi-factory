@@ -3,7 +3,8 @@ import { useNavigate, useSearchParams } from 'react-router'
 import { toast } from 'sonner'
 import { useAuth } from '@/auth/AuthContext'
 import { ClinicalTrialPanel } from '@/components/product/ClinicalTrialPanel'
-import { checkClinicalReference, configureClinicalArtifact, getClinicalArtifact, getMyAlgorithmModels, setClinicalTrialEnabled, type ClinicalAlgorithmArtifact } from '@/api/services'
+import { ClinicalSpecEditor } from '@/components/product/ClinicalSpecEditor'
+import { checkClinicalReference, configureClinicalArtifact, getClinicalArtifact, getClinicalParameters, getClinicalRuns, getMyAlgorithmModels, setClinicalTrialEnabled, type ClinicalAlgorithmArtifact, type ClinicalParameter, type ClinicalRun } from '@/api/services'
 import type { BackendService } from '@/lib/mappers'
 
 export function SupplierTrialPage() {
@@ -16,8 +17,12 @@ export function SupplierTrialPage() {
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const [spec, setSpec] = useState<ClinicalAlgorithmArtifact['spec']>({ inputs: [] })
+  const [samples, setSamples] = useState<Record<string, string>>({})
+  const [parameters, setParameters] = useState<ClinicalParameter[]>([])
+  const [runs, setRuns] = useState<ClinicalRun[]>([])
+  const [advanced, setAdvanced] = useState(false)
   const [specText, setSpecText] = useState('')
-  const [smokeText, setSmokeText] = useState('{}')
   const [referenceInputs, setReferenceInputs] = useState('{}')
   const [referenceExpected, setReferenceExpected] = useState('')
   const [referenceCitation, setReferenceCitation] = useState('')
@@ -44,8 +49,9 @@ export function SupplierTrialPage() {
     getClinicalArtifact(selectedId).then((item) => {
       if (!active) return
       setArtifact(item)
+      setSpec(item.spec)
       setSpecText(JSON.stringify(item.spec, null, 2))
-      setSmokeText(JSON.stringify(item.smokeInput || {}, null, 2))
+      setSamples(Object.fromEntries(Object.entries(item.smokeInput || {}).map(([name, value]) => [name, String(value)])))
       setReferenceInputs(JSON.stringify(item.smokeInput || {}, null, 2))
       setReferenceCitation(item.source?.referenceCheck?.citation || '')
       setReferenceExpected(item.source?.referenceCheck ? JSON.stringify(item.source.referenceCheck.expected, null, 2) : '')
@@ -53,14 +59,42 @@ export function SupplierTrialPage() {
     return () => { active = false }
   }, [selectedId, revision])
 
+  useEffect(() => {
+    if (!selectedId) return
+    let active = true
+    setParameters([])
+    getClinicalParameters(selectedId).then((items) => { if (active) setParameters(items) })
+      .catch((cause) => { if (active) toast.error(cause instanceof Error ? cause.message : '无法读取源码参数') })
+    return () => { active = false }
+  }, [selectedId])
+
+  useEffect(() => {
+    if (!selectedId) return
+    let active = true
+    getClinicalRuns(selectedId).then((items) => { if (active) setRuns(items) }).catch(() => { if (active) setRuns([]) })
+    return () => { active = false }
+  }, [selectedId, revision])
+
   async function configure() {
     if (!selectedId) return
     setBusy(true)
     try {
-      const spec = JSON.parse(specText) as ClinicalAlgorithmArtifact['spec']
-      const smokeInput = JSON.parse(smokeText) as Record<string, unknown>
-      if (!spec || !Array.isArray(spec.inputs) || !smokeInput || typeof smokeInput !== 'object' || Array.isArray(smokeInput)) throw new Error('输入规范或合成样例格式错误')
-      const updated = await configureClinicalArtifact(selectedId, spec, smokeInput)
+      const nextSpec = advanced ? JSON.parse(specText) as ClinicalAlgorithmArtifact['spec'] : spec
+      if (!nextSpec || !Array.isArray(nextSpec.inputs) || !nextSpec.inputs.length) throw new Error('请先配置输入字段')
+      const smokeInput: Record<string, unknown> = {}
+      for (const field of nextSpec.inputs) {
+        const raw = samples[field.name]?.trim() || ''
+        if (!raw) { if (field.required !== false) throw new Error(`请填写${field.label || field.name}的合成样例`); continue }
+        if (field.type === 'number' || field.type === 'integer') {
+          const value = Number(raw)
+          if (!Number.isFinite(value) || (field.type === 'integer' && !Number.isInteger(value))) throw new Error(`${field.label || field.name}需要有效数值`)
+          smokeInput[field.name] = value
+        } else if (field.type === 'boolean') {
+          if (raw !== 'true' && raw !== 'false') throw new Error(`${field.label || field.name}请填写 true 或 false`)
+          smokeInput[field.name] = raw === 'true'
+        } else smokeInput[field.name] = raw
+      }
+      const updated = await configureClinicalArtifact(selectedId, nextSpec, smokeInput, artifact!.version)
       setArtifact(updated)
       setRevision((value) => value + 1)
       toast.message(updated.status === 'ready' ? '样例运行已通过' : `验证未通过：${updated.validationError || '请检查运行环境'}`)
@@ -105,12 +139,12 @@ export function SupplierTrialPage() {
       <section className="bg-white border rounded-2xl p-5 space-y-3">
         <h2 className="font-semibold">运行状态：{artifact.status === 'ready' ? '样例验证通过' : '待配置或验证失败'}</h2>
         <p className="text-sm text-gray-500">版本 {artifact.version}。{artifact.validationError || '输入规范与源码已绑定到同一版本。'}</p>
-        <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={Boolean(artifact.publicTrialEnabled)} onChange={() => void toggleTrial()} disabled={busy} /> 目录审核通过后允许其他已授权用户试用</label>
+        <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={Boolean(artifact.publicTrialEnabled)} onChange={() => void toggleTrial()} disabled={busy || artifact.status !== 'ready'} /> 目录审核通过后允许其他已授权用户试用</label>
       </section>
       <section className="bg-white border rounded-2xl p-5 space-y-3">
-        <h2 className="font-semibold">配置运行规范</h2><p className="text-xs text-gray-500">输入字段名称和顺序必须与 Python 的 main_process 参数一致。请用合成数据填写样例，保存后平台会实际运行。</p>
-        <label className="block text-sm">输入输出规范 JSON<textarea value={specText} onChange={(event) => setSpecText(event.target.value)} rows={10} className="block w-full border rounded-xl p-3 mt-1 font-mono text-xs" /></label>
-        <label className="block text-sm">合成样例 JSON<textarea value={smokeText} onChange={(event) => setSmokeText(event.target.value)} rows={5} className="block w-full border rounded-xl p-3 mt-1 font-mono text-xs" /></label>
+        <div className="flex justify-between items-center"><h2 className="font-semibold">配置运行规范</h2><label className="text-sm"><input type="checkbox" checked={advanced} onChange={(event) => { setAdvanced(event.target.checked); if (event.target.checked) setSpecText(JSON.stringify(spec, null, 2)) }} /> JSON 高级编辑</label></div>
+        <p className="text-xs text-gray-500">请使用合成数据填写样例。保存后平台会实际运行；修改配置将产生新版本，并关闭公开试用。</p>
+        {advanced ? <label className="block text-sm">输入输出规范 JSON<textarea value={specText} onChange={(event) => setSpecText(event.target.value)} rows={12} className="block w-full border rounded-xl p-3 mt-1 font-mono text-xs" /></label> : <ClinicalSpecEditor spec={spec} parameters={parameters} samples={samples} onSpecChange={setSpec} onSamplesChange={setSamples} />}
         <button disabled={busy} onClick={() => void configure()} className="bg-blue-600 text-white rounded-xl px-4 py-2 text-sm disabled:opacity-50">{busy ? '验证中…' : '保存并运行样例验证'}</button>
       </section>
       {artifact.source?.reproductionMode && <section className="bg-white border rounded-2xl p-5 space-y-3">
@@ -123,6 +157,11 @@ export function SupplierTrialPage() {
         {artifact.source.referenceCheck && <p className={artifact.source.referenceCheck.passed ? 'text-sm text-green-700' : 'text-sm text-red-700'}>最近一次对照：{artifact.source.referenceCheck.passed ? '通过' : '未通过'}，版本 {artifact.source.referenceCheck.artifactVersion}</p>}
       </section>}
       <ClinicalTrialPanel key={`${selectedId}-${revision}`} modelId={selectedId} isAuthenticated />
+      <section className="bg-white border rounded-2xl p-5 space-y-3">
+        <div className="flex justify-between items-center"><h2 className="font-semibold">最近运行记录</h2><button className="text-sm text-blue-600" onClick={() => void getClinicalRuns(selectedId).then(setRuns).catch(() => toast.error('读取运行记录失败'))}>刷新</button></div>
+        <p className="text-xs text-gray-500">仅记录状态和耗时，不保存试用时的输入输出。</p>
+        {runs.length ? <ul className="space-y-2">{runs.map((run) => <li key={run.runId} className="text-xs border-b pb-2 text-gray-600">{new Date(run.startedAt).toLocaleString()} · 版本 {run.version} · {run.status === 'succeeded' ? '成功' : run.status === 'failed' ? `失败${run.errorCode ? `（${run.errorCode}）` : ''}` : run.status === 'interrupted' ? '运行中断' : '运行中'}{run.durationMs !== null && run.durationMs !== undefined ? ` · ${run.durationMs} ms` : ''}</li>)}</ul> : <p className="text-sm text-gray-500">暂无试用运行记录</p>}
+      </section>
     </>}
   </div>
 }

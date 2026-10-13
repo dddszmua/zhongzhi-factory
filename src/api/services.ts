@@ -71,9 +71,22 @@ export interface ClinicalAlgorithmArtifact {
     title?: string
     description?: string
     clinicalScope?: string
-    inputs: Array<{ name: string; label?: string; type: 'number' | 'integer' | 'string' | 'boolean'; unit?: string; minimum?: number; maximum?: number; description?: string; required?: boolean; options?: string[] }>
-    output?: { description?: string }
+    inputs: Array<{ name: string; label?: string; type: 'number' | 'integer' | 'string' | 'boolean'; unit?: string; minimum?: number | null; maximum?: number | null; description?: string; required?: boolean; options?: string[] }>
+    output?: { type?: 'number' | 'integer' | 'string' | 'boolean' | 'object' | 'array'; description?: string }
   }
+}
+
+export type ClinicalParameter = { name: string; required: boolean }
+export type ClinicalRun = { runId: string; serviceId: string; version: number; status: 'running' | 'succeeded' | 'failed' | 'interrupted'; errorCode?: string | null; startedAt: number; finishedAt?: number | null; durationMs?: number | null }
+
+export async function getClinicalRuns(id: string): Promise<ClinicalRun[]> {
+  const result = await apiClient.get(`/services/${id}/algorithm-runs`) as { runs: ClinicalRun[] }
+  return result.runs
+}
+
+export async function getClinicalParameters(id: string): Promise<ClinicalParameter[]> {
+  const result = await apiClient.get(`/services/${id}/clinical-artifact/parameters`) as { parameters: ClinicalParameter[] }
+  return result.parameters
 }
 
 export interface ClinicalReferenceCheckResult {
@@ -95,7 +108,7 @@ export async function getClinicalArtifact(id: string): Promise<ClinicalAlgorithm
   return result.artifact
 }
 
-export async function runClinicalAlgorithm(id: string, inputs: Record<string, unknown>, version: number, units: Record<string, string>): Promise<{ result: unknown; version: number }> {
+export async function runClinicalAlgorithm(id: string, inputs: Record<string, unknown>, version: number, units: Record<string, string>): Promise<{ result: unknown; version: number; runId?: string; durationMs?: number }> {
   return apiClient.post(`/services/${id}/algorithm-run`, { inputs, version, units })
 }
 
@@ -103,8 +116,8 @@ export async function setClinicalTrialEnabled(id: string, enabled: boolean): Pro
   await apiClient.post(`/services/${id}/clinical-trial-policy`, { enabled })
 }
 
-export async function configureClinicalArtifact(id: string, spec: ClinicalAlgorithmArtifact['spec'], smokeInput: Record<string, unknown>): Promise<ClinicalAlgorithmArtifact> {
-  const result = await apiClient.post(`/services/${id}/clinical-artifact/configure`, { spec, smokeInput }) as { artifact: ClinicalAlgorithmArtifact }
+export async function configureClinicalArtifact(id: string, spec: ClinicalAlgorithmArtifact['spec'], smokeInput: Record<string, unknown>, expectedVersion: number): Promise<ClinicalAlgorithmArtifact> {
+  const result = await apiClient.post(`/services/${id}/clinical-artifact/configure`, { spec, smokeInput, expectedVersion }) as { artifact: ClinicalAlgorithmArtifact }
   return result.artifact
 }
 
