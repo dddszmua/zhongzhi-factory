@@ -854,7 +854,7 @@ export function SupplierCreatePage() {
                 样例验证通过且目录审核后，允许其他登录用户在线试用
               </label>
               <p className="text-xs text-gray-400">提交后模型进入待审核状态。性能指标只能来自实际数据评估。</p>
-              {publishedId && <p className="text-xs text-green-600">已提交 ID：{publishedId}</p>}
+              {publishedId && <div className="flex flex-wrap items-center gap-3"><p className="text-xs text-green-600">已提交 ID：{publishedId}</p><button type="button" className="text-sm text-blue-600 font-semibold" onClick={() => navigate(`/supplier/trial?id=${publishedId}`)}>前往在线试用配置 →</button></div>}
             </div>
           )}
 
