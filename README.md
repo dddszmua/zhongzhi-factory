@@ -1,5 +1,13 @@
 # 临床医疗算法模型众智工场
 
+## 提交新模型（简化流程）
+
+`/supplier/create` 先让用户选择“自然语言对话创建”或“论文复现”。生成前只需填写模型名称和需求描述；论文模式还需上传 PDF/DOCX 并核对提取内容。每个任务有独立的 `/supplier/create/task/<id>` 地址，刷新后从后端读取对话、论文、生成进度和结果。“最近任务”可找回已离开的任务。已有代码上传和旧草稿继续走 `/supplier/create/legacy`。
+
+本地联调需要同时启动 `ioeb_backend`、`Micro-Agent` 和前端。后端设置 `DATABASE_URL` 指向本地数据库；Agent 地址通过 `CLINICAL_AGENT_BASE_URL` 指定，未设置时使用 `MCP_AGENT_BASE_URL`，再未设置时为 `http://127.0.0.1:8010`。后端运行在 Docker 容器内时，地址须改为容器能访问的 Agent 地址。前端开发代理继续使用 `.env.development` 中的 `VITE_DEV_API_PROXY` 和 `VITE_DEV_AGENT_PROXY`。
+
+任务数据保存在 `clinical_creation_jobs` 表，论文文件保存在后端 `UPLOAD_FOLDER/clinical-creation` 下；生产部署需持久化该目录，并应用 `ioeb_backend/scripts/sql/20261013_clinical_creation_jobs_mysql.sql`。生成由后端进程中的工作线程执行，浏览器刷新不会中断；若后端进程重启，运行中的任务会在约 30 秒后标记为“任务中断”，用户可在任务页重新生成。
+
 本站面向临床医生与医学研究团队，提供临床算法目录、结构化需求描述、模型说明卡、浏览器本地的二分类验证，以及模型提交与 MCP 服务封装。公开目录仅展示具有临床说明卡且审核状态为批准的服务；历史服务默认待归类。详细实现和后端上线约束见[临床专站说明](docs/clinical-site.md)。
 
 这是一个独立的 React 单页应用，通过 HTTP 调用 `ioeb_backend` 的 `/api` 接口及可选的 `Micro-Agent` 智能体接口。仓库仅包含前端；后端及智能体需分别部署。默认开发代理和容器 Nginx 代理均指向 `https://fdueblab.cn`。**当前临床目录筛选只在前端执行，正式上线必须由后端实现目录审核与访问控制。**
@@ -131,6 +139,16 @@ docker compose logs --tail=100 zhongzhi-frontend
 本项目与旧版 `ioeb` Vue 前端并行；通过 REST API 消费 `ioeb_backend`，并按需调用 `Micro-Agent`。该仓库的构建与部署不依赖旧前端仓库。第三方素材与组件来源见 [ATTRIBUTIONS.md](ATTRIBUTIONS.md)。
 
 ## 当前功能与后端配套
+
+### 科室模型与论文示例（2026-11-17）
+
+- 主入口为首页、科室模型、创建模型、我的模型。用户页面不再提供 MCP 入口；旧链接显示入口已停用，底层执行接口保持兼容。
+- 科室目录使用 `src/lib/departments.ts` 中的稳定 ID。模型的 `ZZF_CLINICAL_V1` 说明卡新增 `departmentIds`；历史模型仍按专科说明匹配，可从编辑页重新归类。仅修改创建任务所属科室不会使已生成算法失效。
+- 创建时先选择科室，再使用示例论文、上传论文或描述需求。所属科室持久保存在创建任务 `intake.catalog.departmentId` 中，并在保存模型时写入说明卡。
+- 论文目录由后端 `app/resources/clinical_catalog/catalog.json` 管理，覆盖 13 个科室，共 11 篇去重文献。其中 10 篇保存本地 PDF 和可编辑的预设要求；ADNEX 的公开下载源暂不可用，按钮禁用并提示文件未就绪。点击「使用此论文复现」直接创建已附论文的任务，无需手动下载上传，也不依赖期刊网站实时可用。`canCreate` 表示本地材料可用，与算法验收状态 `readiness` 分开。新增文件保留原始 PDF，并记录下载来源、SHA-256 和使用条件；PRIEST 和 ABC₂-SPH 继续保留已核对的补充转录。
+- `GET /api/clinical-creation/catalog` 提供目录；创建任务支持 `departmentId`、`paperId`、`paperVersion`。自动带入仅接受目录内已备齐材料、匹配科室与版本的论文，并检查 PDF 摘要。替换论文会清除旧示例规则与恢复记录。
+- 示例材料完整不等于新生成版本已通过计算或临床验证。当前运行、生成和验证机制保持不变。
+- 本次回归：`npm run typecheck`、`npm run build`、`node --test tests/departments.test.mjs tests/clinicalResult.test.mjs`；后端运行 `python -m pytest tests/integration/test_clinical_creation.py tests/unit/test_reproduction_evidence.py -q`。
 
 - 买家：引导式需求填写和市场检索、收藏列表、商品咨询、消息中心、已配置服务的在线试用。商品详情支持导入最多 20 条 JSON 用例进行浏览器端批量测评，按预期 JSON 比较输出；测评结果不会保存到服务器。
 - 供应商：服务端草稿、续编和发布，已登记商品编辑，消息回复，生成源码查看与下载。手动上传可提交主 Python 源码、可选测试脚本及数据集，交由后端保存。

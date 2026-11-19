@@ -22,6 +22,18 @@ export type ScenarioIntakeResult = {
 }
 
 export type AmlGenerateResult = {
+  reproduction?: {
+    status?: string
+    gaps?: string[]
+    evidence?: {
+      population?: string
+      outcome?: string
+      horizon?: string
+      limitations?: string[]
+      input_policies?: string[]
+      rules?: Array<{ id?: string; input?: string; unit?: string; rule?: string; source?: { page?: number; location?: string; quote?: string; kind?: string } }>
+    }
+  }
   model_name?: string
   generated_code?: string
   code_filename?: string

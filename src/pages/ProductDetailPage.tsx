@@ -15,7 +15,7 @@ import { isClinicalListed, readClinicalCard } from '@/lib/clinical'
 
 export function ProductDetailPage() {
   const { id } = useParams<{ id: string }>()
-  const [params] = useSearchParams()
+  const [params, setParams] = useSearchParams()
   const navigate = useNavigate()
   const { user, isAuthenticated } = useAuth()
   const [product, setProduct] = useState<AlgorithmProduct | null>(null)
@@ -25,6 +25,8 @@ export function ProductDetailPage() {
   const [inquiry, setInquiry] = useState('')
   const [inquiryBusy, setInquiryBusy] = useState(false)
   const showTrial = params.get('trial') === '1'
+  const [tab, setTab] = useState<'trial' | 'evidence' | 'author'>(showTrial ? 'trial' : 'evidence')
+  useEffect(() => { setTab(showTrial ? 'trial' : 'evidence') }, [showTrial, id])
 
   useEffect(() => {
     if (!id) return
@@ -93,8 +95,8 @@ export function ProductDetailPage() {
   return (
     <div className="min-h-screen bg-[#f8f9fc]" style={{ fontFamily: "'Plus Jakarta Sans', 'Inter', sans-serif" }}>
       <NavBar />
-      <main className="pt-24 pb-16">
-        <div className="max-w-[1100px] mx-auto px-6 lg:px-12">
+      <main className="pt-8 pb-24">
+        <div className="max-w-[1280px] mx-auto px-6 lg:px-12">
           <button
             onClick={() => navigate(-1)}
             className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-blue-600 mb-6"
@@ -107,8 +109,8 @@ export function ProductDetailPage() {
           ) : !product ? (
             <div className="text-sm text-gray-400 py-20 text-center">该模型未进入临床公开目录</div>
           ) : (<>
-            <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
-              <div className="lg:col-span-3 space-y-5">
+            <div className="flex flex-col gap-6">
+              <div className="space-y-5">
                 <div className="bg-white rounded-2xl border border-black/5 p-6">
                   <div className="flex flex-wrap gap-1.5 mb-3">
                     {product.badges.map((b) => (
@@ -145,7 +147,7 @@ export function ProductDetailPage() {
                     ))}
                   </div>
                   <div className="flex gap-2 mt-6">
-                    <Btn onClick={() => document.getElementById('trial-panel')?.scrollIntoView({ behavior: 'smooth' })}>
+                    <Btn onClick={() => { setTab('trial'); setParams({ trial: '1' }) }}>
                       <Play size={14} /> 在线试用
                     </Btn>
                     <Link to="/market">
@@ -156,7 +158,12 @@ export function ProductDetailPage() {
                     </Btn>
                   </div>
                 </div>
-                <section className="bg-white rounded-2xl border border-black/5 p-6" aria-label="临床模型说明卡">
+                <nav className="cw-detail-tabs" aria-label="模型详情">
+                  <button aria-selected={tab === 'trial'} onClick={() => { setTab('trial'); setParams({ trial: '1' }) }}>在线试用</button>
+                  <button aria-selected={tab === 'evidence'} onClick={() => { setTab('evidence'); setParams({}) }}>适用范围与依据</button>
+                  <button aria-selected={tab === 'author'} onClick={() => setTab('author')}>作者与咨询</button>
+                </nav>
+                <section hidden={tab !== 'evidence'} className="bg-white rounded-2xl border border-black/5 p-6" aria-label="临床模型说明卡">
                   <h2 className="font-bold text-gray-900 mb-2">临床模型说明卡</h2>
                   <p className="text-xs text-gray-500 mb-4">目录审核、代码运行和临床验证分别记录。接口可调用不代表模型通过临床验证。</p>
                   <dl className="grid sm:grid-cols-2 gap-4 text-sm">
@@ -174,15 +181,16 @@ export function ProductDetailPage() {
                     <p className="bg-blue-50 p-3 rounded-lg">临床数据验证：{readClinicalCard(product.raw)?.validation || '未提供'}</p>
                   </div>
                 </section>
-                {(!user?.id || product.creatorId !== user.id) && <div className="bg-white rounded-2xl border border-black/5 p-6">
-                  <h2 className="font-bold text-gray-900">咨询供应商</h2>
-                  <p className="text-xs text-gray-500 mt-1 mb-3">描述业务需求或试用问题，供应商会在消息中心回复。</p>
+                {tab === 'author' && <section className="bg-white rounded-2xl border p-6 text-sm"><h2 className="font-semibold mb-3">作者与版本</h2><p>开发团队：{readClinicalCard(product.raw)?.team || '尚未提供'}</p><p className="mt-2">模型说明版本：{readClinicalCard(product.raw)?.version || '尚未提供'}</p></section>}
+                {tab === 'author' && (!user?.id || product.creatorId !== user.id) && <div className="bg-white rounded-2xl border border-black/5 p-6">
+                  <h2 className="font-bold text-gray-900">联系模型作者</h2>
+                  <p className="text-xs text-gray-500 mt-1 mb-3">描述业务需求或试用问题，作者会在消息中心回复。</p>
                   <textarea value={inquiry} onChange={(event) => setInquiry(event.target.value)} maxLength={2000} rows={4} placeholder="例如：我的数据格式能否用于这个算法？" className="w-full border border-gray-200 rounded-xl p-3 text-sm resize-y" />
                   <div className="flex items-center gap-4 mt-3"><Btn disabled={inquiryBusy || !inquiry.trim()} onClick={() => void submitInquiry()}>{inquiryBusy ? '发送中…' : '发送咨询'}</Btn><Link className="text-sm text-blue-600" to="/messages">查看消息</Link></div>
                 </div>}
               </div>
 
-              <div className="lg:col-span-2" id="trial-panel">
+              <div hidden={tab !== 'trial'} id="trial-panel">
                 <div className={showTrial ? 'ring-2 ring-blue-100 rounded-2xl' : ''}><ClinicalTrialPanel modelId={product.id} isAuthenticated={isAuthenticated} canRun={product.raw.onlineUsage?.canRun} unavailableReason={product.raw.onlineUsage?.reason} /></div>
               </div>
             </div>
