@@ -1,989 +1,351 @@
 import { useEffect, useRef, useState } from 'react'
-import { useNavigate, useSearchParams } from 'react-router'
-import { ArrowLeft, Check, Cpu, Eye, Loader2, Sparkles, UploadCloud, X } from 'lucide-react'
+import { Link, Navigate, useNavigate, useParams, useSearchParams } from 'react-router'
 import { toast } from 'sonner'
-import { previewReference, streamAutoGenerate, uploadScenarioGenerated, type AmlGenerateResult } from '@/api/scenarioDev'
+import { useUnsavedChanges } from '@/lib/useUnsavedChanges'
 import { useAuth } from '@/auth/AuthContext'
-import { Btn } from '@/components/ui/Btn'
-import { DOMAIN_OPTIONS, INDUSTRY_OPTIONS, BLUE, GREEN } from '@/lib/constants'
-import { mapAgentStepToFriendly, PROGRESS_STEPS } from '@/lib/scenarioConfig'
-import { buildCreatePayload } from '@/lib/mappers'
-import { createService, getMyAlgorithmModels, setClinicalTrialEnabled, updateService } from '@/api/services'
-import { emptyClinicalCard, encodeClinicalCard, type ClinicalCard } from '@/lib/clinical'
+import { departments } from '@/lib/departments'
+import { PaperPicker } from '@/components/clinical/PaperPicker'
+import type { ClinicalPaper } from '@/api/clinicalCatalog'
+import {
+  createCreationJob, getCreationJob, listCreationJobs, openCreationReference,
+  publishCreationJob, sendCreationMessage, startCreationGeneration,
+  updateCreationJob, uploadCreationReference,
+  type CreationJob, type CreationMode,
+} from '@/api/clinicalCreation'
 
-const DRAFT_PREFIX = 'ZZF_DRAFT_V1:'
-
-/** 首期 4 步（价格/认证不做）——保持原设计交互 */
-const STEPS = ['填写临床信息', '配置输入输出', '上传模型或生成开发模板', '配置在线试用']
-
-const INPUT_OPTIONS = ['结构化临床数据', '医学影像', '病历文本', '心电等时序信号']
-const OUTPUT_OPTIONS = ['分析报告', '风险清单', '分类结果', '预测结果', '图表', '结构化 JSON']
-const SCENARIO_OPTIONS = ['风险预测', '辅助筛查', '影像分析', '检验分析', '病历信息提取', '随访与预后评估']
-const CARD_FIELDS: Array<{ key: keyof ClinicalCard; label: string; hint: string }> = [
-  { key: 'population', label: '适用人群与纳入条件', hint: '例如：成年住院患者' },
-  { key: 'timepoint', label: '模型使用时点', hint: '例如：入院后 24 小时' },
-  { key: 'exclusions', label: '排除与不适用情况', hint: '例如：缺少基线检查者' },
-  { key: 'inputs', label: '输入字段及医学含义', hint: '逐项列出输入字段' },
-  { key: 'units', label: '计量单位和允许范围', hint: '例如：血压 mmHg，范围 40–260' },
-  { key: 'missing', label: '缺失值及错误单位处理', hint: '说明拒绝或插补规则' },
-  { key: 'output', label: '输出含义', hint: '例如：未来 30 天事件发生概率' },
-  { key: 'horizon', label: '预测时间范围', hint: '例如：出院后 30 天' },
-  { key: 'threshold', label: '阈值依据', hint: '如无阈值，请说明' },
-  { key: 'dataSource', label: '数据来源概况', hint: '仅写数据摘要，不上传可识别患者资料' },
-  { key: 'sampleSize', label: '评估样本量', hint: '若未评估，请写未评估' },
-  { key: 'validation', label: '验证方式', hint: '例如：时间外验证；未开展则如实说明' },
-  { key: 'results', label: '实际运行结果', hint: '仅填写由真实评估得到的指标' },
-  { key: 'version', label: '模型版本', hint: '例如：0.1.0' },
-  { key: 'team', label: '开发团队', hint: '团队或机构名称' },
-  { key: 'references', label: '参考文献', hint: '文献或研究方案' },
-  { key: 'limitations', label: '已知限制', hint: '例如：尚未外部验证' },
-  { key: 'intendedUse', label: '允许使用场景', hint: '例如：研究评估，不用于独立诊断' },
-]
-
-type SourceMode = 'upload' | 'generate' | null
-type ReferencePreviewState = { text?: string; truncated?: boolean; error?: string; loading?: boolean }
-const referenceKey = (file: File) => `${file.name}:${file.size}:${file.lastModified}`
-const CKD_EPI_DEMO_NAME = '2021 CKD-EPI 成人肌酐 eGFR 公式复现'
-
-const CKD_EPI_DEFAULT_CLINICAL_CARD: ClinicalCard = {
-  ...emptyClinicalCard,
-  specialty: '肾脏病学与检验医学',
-  population: '18 岁及以上成年人；',
-  timepoint: '获得血清肌酐检验结果后。',
-  exclusions: '年龄低于 18 岁、任何输入缺失、血清肌酐单位不是 mg/dL 时不计算；不处理公式性别选项无法确定的情况。',
-  inputs: 'age_years：年龄；sex：公式使用的 male 或 female 选项；scr_mg_dl：标准化血清肌酐浓度。',
-  units: 'age_years：岁，本演示允许 18–90；scr_mg_dl：mg/dL，本演示允许 0.5–1.5；sex：male 或 female。这里的输入范围只为本次演示设定，不代表公式全部临床适用范围。',
-  missing: '不插补；输入缺失、数值越界或肌酐单位不符时拒绝计算。',
-  output: 'egfr_ml_min_1_73m2：按 2021 CKD-EPI 肌酐公式估算并取整的 eGFR，单位 mL/min/1.73 m²。',
-  horizon: '不适用；这是根据当前检验数据进行的即时估计。',
-  threshold: '本演示不设置诊断、分期或用药阈值。',
-  dataSource: 'NKF 官方实施说明 PDF 中的公式与测试组合；不使用真实患者数据。',
-  sampleSize: '未开展独立临床数据评估。',
-  validation: '将平台输出与 NKF 官方 PDF 第 2 页的测试值逐项对照。',
-  results: '尚未运行；提交后记录实际对照结果。',
-  version: '0.1.0',
-  team: '公式复现演示',
-  references: 'NKF，Example request to implement the CKD-EPI 2021 equation to calculate eGFR from creatinine，第 1–2 页；原始研究：Inker 等，NEJM 2021。',
-  limitations: 'eGFR 是估计值；仅复现肌酐公式并做指定样例核对，未完成独立临床验证。',
-  intendedUse: '教学、研发测试和公式实现核对；不作为独立临床决策依据。',
+const statusLabel: Record<CreationJob['status'], string> = {
+  draft: '待完善', running: '生成中', completed: '已生成', failed: '生成失败',
+  interrupted: '任务中断', published: '已保存',
+  needs_review: '待补充资料',
 }
 
-function restoreClinicalCard(savedCard: Partial<ClinicalCard> | undefined, isCkdEpiDemo: boolean): ClinicalCard {
-  const defaults = isCkdEpiDemo ? CKD_EPI_DEFAULT_CLINICAL_CARD : emptyClinicalCard
-  const restored = { ...defaults }
-  for (const key of Object.keys(emptyClinicalCard) as Array<keyof ClinicalCard>) {
-    const value = savedCard?.[key]
-    if (typeof value === 'string' && value.trim()) {
-      Object.assign(restored, { [key]: value })
-    }
-  }
-  return restored
+function errorText(error: unknown) {
+  return error instanceof Error ? error.message : '操作失败，请稍后重试'
 }
 
 export function SupplierCreatePage() {
-  const navigate = useNavigate()
+  const { taskId } = useParams()
   const [params] = useSearchParams()
-  const draftId = params.get('draft') || ''
-  const initialRequirement = draftId ? '' : params.get('requirement') || ''
+  const navigate = useNavigate()
+  const [departmentId, setDepartmentId] = useState(() => departments.find(d => d.name === params.get('department') || d.id === params.get('department'))?.id.replace(/^all$/, '') || '')
+  const [sourceTab, setSourceTab] = useState<'examples' | 'upload' | 'conversation'>('examples')
   const { user } = useAuth()
-  const [step, setStep] = useState(0)
-  const abortRef = useRef<AbortController | null>(null)
-
-  const [form, setForm] = useState({
-    name: CKD_EPI_DEMO_NAME,
-    tagline: '根据年龄、性别及标准化血清肌酐，复现 2021 CKD-EPI 成人 eGFR 计算公式。',
-    domain: 'health',
-    industry: '临床医疗',
-    scenario: '检验分析',
-    problem: '复现 2021 CKD-EPI 肌酐公式，计算成年人基于血清肌酐的估计肾小球滤过率 eGFR。输入年龄、公式所需性别选项、采用 IDMS 可溯源方法测得的血清肌酐；输出整数 eGFR，单位 mL/min/1.73 m²。',
-    suitable: '检验信息系统公式实现验证、医学算法教学，以及使用公开测试组合测试平台在线计算。',
-    unsuitable: '不用于未成年人、缺少或单位不明的肌酐结果，也不依据演示结果直接诊断、分期或调整药物剂量。',
-    inputTypes: ['结构化临床数据'] as string[],
-    outputTypes: ['预测结果'] as string[],
-    ...(initialRequirement ? { name: '', tagline: '', problem: initialRequirement, suitable: '', unsuitable: '', scenario: '' } : {}),
-  })
-  const [clinicalCard, setClinicalCard] = useState<ClinicalCard>(initialRequirement ? emptyClinicalCard : CKD_EPI_DEFAULT_CLINICAL_CARD)
-
-  const [sourceMode, setSourceMode] = useState<SourceMode>(null)
-  const [files, setFiles] = useState<File[]>([])
-  const [generationMode, setGenerationMode] = useState<'new_design' | 'reproduce'>('new_design')
-  const [reproduceTarget, setReproduceTarget] = useState('公式或评分计算')
-  const [mainReferences, setMainReferences] = useState<File[]>([])
-  const [referencePreviews, setReferencePreviews] = useState<Record<string, ReferencePreviewState>>({})
-  const [reviewedReferences, setReviewedReferences] = useState<string[]>([])
-  const [referenceFiles, setReferenceFiles] = useState<File[]>([])
-  const mainFileInputRef = useRef<HTMLInputElement>(null)
-  const supplementalFileInputRef = useRef<HTMLInputElement>(null)
-  const [referenceNotes, setReferenceNotes] = useState('')
-  const [referenceUrls, setReferenceUrls] = useState('')
-  const [allowTrial, setAllowTrial] = useState(true)
+  const [job, setJob] = useState<CreationJob | null>(null)
+  const [recent, setRecent] = useState<CreationJob[]>([])
+  const [showAllRecent, setShowAllRecent] = useState(false)
+  const [loading, setLoading] = useState(true)
+  const [busy, setBusy] = useState(false)
   const [saving, setSaving] = useState(false)
-  const fileInputRef = useRef<HTMLInputElement>(null)
-
-  // 仅生成能力（不改成想定式整页）
-  const [generating, setGenerating] = useState(false)
-  const [genMsg, setGenMsg] = useState('')
-  const [friendlyStep, setFriendlyStep] = useState(1)
-  const [genResult, setGenResult] = useState<AmlGenerateResult | null>(null)
-  const [genSignature, setGenSignature] = useState('')
-  const [publishedId, setPublishedId] = useState<string | null>(null)
-  const agentTickRef = useRef(0)
-  const generationSignature = JSON.stringify({ form, clinicalCard, generationMode, reproduceTarget, mainReferences: mainReferences.map(referenceKey), references: referenceFiles.map(referenceKey), referenceNotes, referenceUrls })
+  const [uploading, setUploading] = useState(false)
+  const paperUploadRef = useRef<HTMLInputElement>(null)
+  const [message, setMessage] = useState('')
+  const [step, setStep] = useState(0)
+  const [revising, setRevising] = useState(false)
+  const [saveState, setSaveState] = useState('已保存')
+  const [dirty, setDirty] = useState(false)
+  const [guide, setGuide] = useState({ population: '', inputs: '', output: '' })
+  const [guided, setGuided] = useState(true)
+  const saveQueue = useRef<Promise<unknown>>(Promise.resolve())
+  const editVersion = useRef(0)
+  const activeTask = useRef(taskId)
+  activeTask.current = taskId
+  useUnsavedChanges(dirty || Boolean(message.trim()) || (!job?.messages.length && Object.values(guide).some(value => value.trim())))
+  const missing = !job ? '' : !job.name.trim() ? '请填写模型名称' : job.mode === 'paper' ? (!job.referenceName ? '请先上传论文' : '') : !job.description.trim() ? '请填写要解决的问题' : ''
+  const stage = job?.status === 'published' ? 3 : job?.status === 'running' || (job?.status === 'completed' && !revising) ? 2 : step
+  function edit(patch: Partial<CreationJob>) { editVersion.current++; setJob(current => current ? { ...current, ...patch } : current); setDirty(true); setSaveState('尚未保存') }
+  function showStep(next: number) { setStep(next); window.scrollTo({ top: 0, behavior: 'smooth' }) }
+  const initialRequirement = params.get('requirement') || ''
+  const legacyDraft = params.get('draft')
 
   useEffect(() => {
-    if (!draftId || !user?.id) return
-    getMyAlgorithmModels(user.id).then((items) => {
-      const draft = items.find((item) => item.id === draftId && item.status === 'draft')
-      if (!draft) throw new Error('草稿不存在或无权编辑')
-      const encoded = draft.source?.companyIntroduce || ''
-      if (!encoded.startsWith(DRAFT_PREFIX)) throw new Error('草稿格式无法识别')
-      const saved = JSON.parse(encoded.slice(DRAFT_PREFIX.length)) as Partial<typeof form>
-      setForm((current) => ({ ...current, tagline: '', problem: '', suitable: '', unsuitable: '', ...saved, name: draft.name }))
-      const savedCard = (saved as typeof saved & { clinicalCard?: Partial<ClinicalCard> }).clinicalCard
-      setClinicalCard(restoreClinicalCard(savedCard, draft.name === CKD_EPI_DEMO_NAME))
-    }).catch((error) => toast.error(error instanceof Error ? error.message : '草稿加载失败'))
-  }, [draftId, user?.id])
+    if (!user?.id || legacyDraft) return
+    let active = true
+    setLoading(true)
+    setJob(null)
+    setBusy(false)
+    setSaving(false)
+    editVersion.current++
+    setRecent([])
+    setStep(0)
+    setRevising(false)
+    setDirty(false)
+    setSaveState('已保存')
+    setMessage('')
+    setGuide({ population: '', inputs: '', output: '' })
+    const request = taskId ? getCreationJob(taskId) : listCreationJobs()
+    request.then((value) => {
+      if (!active) return
+      if (Array.isArray(value)) setRecent(value)
+      else { setJob(value); if (value.mode !== 'paper' && value.name && value.description) setStep(1) }
+    }).catch((error) => { if (active) toast.error(errorText(error)) })
+      .finally(() => { if (active) setLoading(false) })
+    return () => { active = false }
+  }, [taskId, user?.id, legacyDraft])
 
-  async function saveDraft() {
-    if (!user?.id) return
-    if (!form.name.trim()) {
-      toast.error('请先填写算法商品名称')
-      setStep(0)
-      return
+  useEffect(() => {
+    if (!taskId || job?.status !== 'running') return
+    let active = true
+    let timer: number
+    const poll = async () => {
+      try { const next = await getCreationJob(taskId); if (active) { setJob(next); setSaveState('已保存') } }
+      catch { if (active) setSaveState('连接暂时中断，正在重试；任务仍保留') }
+      if (active) timer = window.setTimeout(poll, 3000)
     }
-    setSaving(true)
+    timer = window.setTimeout(poll, 3000)
+    return () => { active = false; window.clearTimeout(timer) }
+  }, [taskId, job?.status])
+
+  async function create(mode: CreationMode) {
+    if (!departmentId) { toast.error('请先选择所属科室'); return }
+    setBusy(true)
     try {
-      const description = form.problem.trim() || form.tagline.trim()
-      const payload = buildCreatePayload({
-        name: form.name.trim(), description, domain: form.domain, industry: form.industry,
-        scenario: form.scenario, inputType: form.inputTypes.join(' / '), outputType: form.outputTypes.join(' / '),
-      })
-      const source = { ...payload.source, companyIntroduce: `${DRAFT_PREFIX}${JSON.stringify({ ...form, clinicalCard })}`, msIntroduce: description }
-      const saved = draftId
-        ? await updateService(draftId, { name: payload.name, domain: payload.domain, industry: payload.industry, scenario: payload.scenario, source })
-        : await createService({ ...payload, status: 'draft', source })
-      if (!draftId && saved?.id) navigate(`/supplier/create?draft=${saved.id}`, { replace: true })
-      toast.success('草稿已保存。文件和 AI 生成结果需要在发布前重新选择或生成。')
+      const created = await createCreationJob(mode, mode === 'conversation' ? initialRequirement : '', { departmentId })
+      navigate(`/supplier/create/task/${created.id}`)
+    } catch (error) { toast.error(errorText(error)) }
+    finally { setBusy(false) }
+  }
+
+  async function usePaper(paper: ClinicalPaper) {
+    if (!departmentId || busy) return
+    setBusy(true)
+    try {
+      const created = await createCreationJob('paper', '', { departmentId, paperId: paper.id, paperVersion: paper.version })
+      navigate(`/supplier/create/task/${created.id}`)
+      toast.success('示例论文已载入，可修改复现要求后直接生成')
+    } catch (error) { toast.error(errorText(error)) }
+    finally { setBusy(false) }
+  }
+
+  function choosePaper() {
+    if (!departmentId) { toast.error('请先选择所属科室'); return }
+    paperUploadRef.current?.click()
+  }
+
+  async function createWithUpload(file: File | undefined) {
+    if (!file || busy) return
+    if (!/\.(pdf|docx)$/i.test(file.name) || !file.size || file.size > 10 * 1024 * 1024) { toast.error('请选择不超过 10 MB 的非空 PDF 或 DOCX 文件'); return }
+    setBusy(true); setUploading(true)
+    let created: CreationJob | undefined
+    try {
+      created = await createCreationJob('paper', '', { departmentId })
+      await uploadCreationReference(created.id, file)
+      navigate(`/supplier/create/task/${created.id}`)
+      toast.success('论文已上传，可填写复现要求后直接生成')
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : '保存草稿失败')
-    } finally {
-      setSaving(false)
-    }
+      if (created) navigate(`/supplier/create/task/${created.id}`)
+      toast.error(errorText(error))
+    } finally { setBusy(false); setUploading(false) }
   }
 
-  function toggle(list: string[], value: string) {
-    return list.includes(value) ? list.filter((x) => x !== value) : [...list, value]
-  }
-
-  function addMainReferences(files: File[]) {
-    const existing = new Set([...mainReferences, ...referenceFiles].map(referenceKey))
-    const added = files.filter((file) => !existing.has(referenceKey(file)))
-    if (mainReferences.length + referenceFiles.length + added.length > 5) {
-      toast.error('参考资料最多 5 份')
-      return
-    }
-    if (added.some((file) => !/\.(pdf|docx)$/i.test(file.name) || file.size > 10 * 1024 * 1024)) {
-      toast.error('主资料仅支持 PDF / DOCX，单份不超过 10 MB')
-      return
-    }
-    setMainReferences((current) => [...current, ...added])
-    added.forEach((file) => void previewMainReference(file))
-  }
-
-  async function previewMainReference(file: File) {
-    const key = referenceKey(file)
-    setReferencePreviews((current) => ({ ...current, [key]: { loading: true } }))
+  async function save(patch: Partial<Pick<CreationJob, 'name' | 'description' | 'notes' | 'referenceReviewed'>>) {
+    if (!job) return
+    const id = job.id
+    const version = editVersion.current
+    const fullPatch = { name: job.name, description: job.description, notes: job.notes, referenceReviewed: job.referenceReviewed, ...patch }
+    setSaving(true); setSaveState('保存中…')
+    const request = saveQueue.current.catch(() => undefined).then(() => updateCreationJob(id, fullPatch))
+    saveQueue.current = request
     try {
-      const preview = await previewReference(file)
-      setReferencePreviews((current) => ({ ...current, [key]: { text: preview.text, truncated: preview.truncated } }))
-    } catch (cause) {
-      const rawMessage = cause instanceof Error ? cause.message : '资料解析失败'
-      const message = /not found|\b404\b/i.test(rawMessage)
-        ? '资料预览接口未找到：请确认本地 Agent 运行在 8010 端口，并重启前端开发服务'
-        : rawMessage
-      setReferencePreviews((current) => ({ ...current, [key]: { error: message } }))
-      toast.error(message)
-    }
+      const updated = await request
+      if (activeTask.current === id && saveQueue.current === request) setJob(current => current?.id === id ? { ...updated, name: current.name, description: current.description, notes: current.notes, referenceReviewed: current.referenceReviewed } : current)
+      if (activeTask.current === id && saveQueue.current === request && editVersion.current === version) { setDirty(false); setSaveState('已保存') }
+    } catch (error) { if (activeTask.current === id) { setDirty(true); setSaveState('保存失败，请重试'); toast.error(errorText(error)) } }
+    finally { if (activeTask.current === id && saveQueue.current === request) setSaving(false) }
   }
 
-  function removeMainReference(file: File) {
-    const key = referenceKey(file)
-    setMainReferences((current) => current.filter((item) => referenceKey(item) !== key))
-    setReviewedReferences((current) => current.filter((item) => item !== key))
-    setReferencePreviews((current) => {
-      const next = { ...current }
-      delete next[key]
-      return next
-    })
-  }
-
-  function openOriginalReference(file: File) {
-    const url = URL.createObjectURL(file)
-    window.open(url, '_blank', 'noopener,noreferrer')
-    window.setTimeout(() => URL.revokeObjectURL(url), 60_000)
-  }
-
-  function addSupplementalReferences(files: File[]) {
-    const existing = new Set([...mainReferences, ...referenceFiles].map(referenceKey))
-    const added = files.filter((file) => !existing.has(referenceKey(file)))
-    if (mainReferences.length + referenceFiles.length + added.length > 5) {
-      toast.error('参考资料最多 5 份')
-      return
-    }
-    if (added.some((file) => file.size > 10 * 1024 * 1024)) {
-      toast.error('单份参考资料不能超过 10 MB')
-      return
-    }
-    setReferenceFiles((current) => [...current, ...added])
-  }
-
-  function validateStep(s = step) {
-    if (s === 0) {
-      if (!form.name.trim()) {
-        toast.error('请填写算法商品名称')
-        return false
-      }
-      if (!form.tagline.trim() && !form.problem.trim()) {
-        toast.error('请填写一句话说明或业务问题')
-        return false
-      }
-    }
-    if (s === 1 && (!form.inputTypes.length || !form.outputTypes.length)) {
-      toast.error('请至少选择一种输入和输出类型')
-      return false
-    }
-    if (s === 2) {
-      if (!sourceMode) {
-        toast.error('请选择算法来源：上传文件或 AI 生成')
-        return false
-      }
-      if (sourceMode === 'upload' && files.length === 0) {
-        toast.error('请上传算法包或源码文件')
-        return false
-      }
-      if (sourceMode === 'generate' && !genResult?.generated_code) {
-        toast.error('请先完成 AI 生成')
-        return false
-      }
-    }
-    return true
-  }
-
-  async function runGenerate() {
-    if (!form.name.trim() || !(form.problem.trim() || form.tagline.trim())) {
-      toast.error('请先完善第 1 步的名称与业务描述')
-      setStep(0)
-      return
-    }
-    abortRef.current?.abort()
-    setGenSignature(generationSignature)
-    setGenerating(true)
-    setGenResult(null)
-    setPublishedId(null)
-    setFriendlyStep(1)
-    setGenMsg('正在根据业务描述生成算法模型…')
-    agentTickRef.current = 0
-
-    const modelName = form.name.trim()
-
-    if (generationMode === 'reproduce' && !mainReferences.length && !referenceFiles.length && !referenceUrls.trim()) {
-      setGenerating(false)
-      toast.error('复现模式请提供论文、专利或参考网址')
-      return
-    }
-    if (generationMode === 'reproduce' && (reproduceTarget.startsWith('已训练模型推理') || reproduceTarget.startsWith('训练方法与实验'))) {
-      setGenerating(false)
-      toast.error('当前在线执行器只支持轻量公式与算法步骤；训练模型还需要权重、依赖和数据环境')
-      return
-    }
-    if (generationMode === 'reproduce' && (referenceFiles.length + mainReferences.length > 5 || [...mainReferences, ...referenceFiles].some((file) => file.size > 10 * 1024 * 1024))) {
-      setGenerating(false)
-      toast.error('参考资料最多 5 份，单份不超过 10 MB')
-      return
-    }
-    if (generationMode === 'reproduce' && mainReferences.some((file) => !referencePreviews[referenceKey(file)]?.text || !reviewedReferences.includes(referenceKey(file)))) {
-      setGenerating(false)
-      toast.error('请先逐份检查主资料提取结果，并确认关键公式、参数所在位置')
-      return
-    }
-    if (generationMode === 'reproduce' && mainReferences.some((file) => referencePreviews[referenceKey(file)]?.truncated) && !referenceNotes.trim()) {
-      setGenerating(false)
-      toast.error('资料较长，请在说明中写出关键页码和公式内容')
-      return
-    }
-
-    const narrative = [form.tagline.trim(), form.problem.trim(), form.suitable.trim(), `复现范围：${generationMode === 'reproduce' ? reproduceTarget : '按临床问题开发'}`, `目标患者：${clinicalCard.population}`, `排除条件：${clinicalCard.exclusions}`, `使用时点：${clinicalCard.timepoint}`, `当时可用数据：${clinicalCard.inputs}`, `输出：${clinicalCard.output}`, `预测时间范围：${clinicalCard.horizon}`, `允许用途：${clinicalCard.intendedUse}`, `已知限制：${clinicalCard.limitations}`]
-      .filter(Boolean)
-      .join('\n')
-
-    const fd = new FormData()
-    fd.append('model_name', modelName)
-    fd.append('free_narrative', narrative)
-    fd.append('domain', 'clinical')
-    fd.append('clinical_task', form.scenario)
-    fd.append('generation_mode', generationMode)
-    if (generationMode === 'reproduce' && mainReferences[0]) fd.append('file', mainReferences[0]);
-    if (generationMode === 'reproduce') [...mainReferences.slice(1), ...referenceFiles].forEach((file) => fd.append('reference_files', file))
-    const urls = generationMode === 'reproduce' ? referenceUrls.split(/\r?\n/).map((url) => url.trim()).filter(Boolean) : []
-    fd.append('reference_urls', JSON.stringify(urls))
-    fd.append('reference_notes', generationMode === 'reproduce' ? referenceNotes.trim() : '')
-    fd.append('industry', form.industry)
-    fd.append('scenario', form.scenario)
-    fd.append('technology', 'AI')
-    fd.append('algorithm_category', reproduceTarget === '公式或评分计算' ? 'regression' : 'classification')
-    fd.append(
-      'category_params',
-      JSON.stringify({
-        inputTypes: form.inputTypes,
-        outputTypes: form.outputTypes,
-        notes: form.unsuitable.trim() || undefined,
-      }),
-    )
-
-    await streamAutoGenerate(fd, {
-      onAbortController: (c) => {
-        abortRef.current = c
-      },
-      onStep: () => {
-        agentTickRef.current += 1
-        const mapped = mapAgentStepToFriendly(agentTickRef.current)
-        setFriendlyStep(mapped.step)
-        setGenMsg(mapped.message)
-      },
-      onError: (error) => {
-        setGenerating(false)
-        setGenMsg(error)
-        toast.error(error)
-      },
-      onWarning: (warning) => {
-        setGenerating(false)
-        setGenMsg(warning)
-        toast.message(warning)
-      },
-      onFinalResult: (results) => {
-        const raw = (results.aml_generate_result || results) as AmlGenerateResult
-        if (!raw.generated_code?.trim()) {
-          setGenerating(false)
-          toast.error('生成结果缺少源码')
-          return
-        }
-        setGenResult({
-          ...raw,
-          model_name: raw.model_name || modelName,
-          code_filename: raw.code_filename || `${modelName}_algorithm.py`,
-        })
-        setFriendlyStep(5)
-        setGenMsg('生成完成，可进入下一步上架')
-        setGenerating(false)
-        toast.success('算法模型已生成')
-      },
-    })
-  }
-
-  async function submit() {
-    if (!validateStep(3) && step !== 3) {
-      /* allow submit from step 3 */
-    }
-    if (!validateStep(2)) return
-    if (sourceMode === 'generate' && generationSignature !== genSignature) {
-      toast.error('生成依据已改变，请重新生成后再保存')
-      setStep(2)
-      return
-    }
-    if (!clinicalCard.population.trim() || !clinicalCard.inputs.trim() || !clinicalCard.output.trim() || !clinicalCard.intendedUse.trim()) {
-      toast.error('请完善说明卡中的适用人群、输入、输出和允许使用场景')
-      setStep(0)
-      return
-    }
-
-    setSaving(true)
+  async function send() {
+    const text = guided && !job?.messages.length ? [guide.population && '适用人群或场景：' + guide.population, guide.inputs && '可用指标：' + guide.inputs, guide.output && '期望结果：' + guide.output].filter(Boolean).join('\n') : message.trim()
+    if (!job || !text) return
+    setBusy(true)
     try {
-      const description = form.problem.trim() || form.tagline.trim()
-      const name = form.name.trim()
-
-      // 路径 A：AI 生成 → 登记 generated_algorithm
-      if (sourceMode === 'generate' && genResult?.generated_code) {
-        const blob = new Blob([genResult.generated_code], { type: 'text/x-python' })
-        const fd = new FormData()
-        fd.append('file', blob, genResult.code_filename || `${name}_algorithm.py`)
-        fd.append('name', name)
-        fd.append('domain', form.domain)
-        fd.append('industry', form.industry)
-        fd.append('scenario', form.scenario)
-        fd.append('technology', 'AI')
-        fd.append('attribute', 'custom')
-        if (draftId) fd.append('draft_id', draftId);
-        if (generationMode === 'reproduce') [...mainReferences, ...referenceFiles].forEach((file) => fd.append('reference_files', file))
-        if (genResult.algorithm_spec?.inputs?.length && genResult.smoke_input) {
-          fd.append('algorithm_spec', JSON.stringify(genResult.algorithm_spec))
-          fd.append('smoke_input', JSON.stringify(genResult.smoke_input))
-        }
-        fd.append(
-          'source',
-          JSON.stringify({
-            popoverTitle: name,
-            companyName: '众智工场供应商',
-            msIntroduce: description,
-            companyIntroduce: encodeClinicalCard({ ...clinicalCard, task: form.scenario, specialty: clinicalCard.specialty }),
-            generationEvidence: [
-              `生成方式：${generationMode === 'reproduce' ? `依据资料复现 / ${reproduceTarget}` : '按需求开发'}`,
-              `资料：${generationMode === 'reproduce' ? ([...mainReferences.map((file) => file.name), ...referenceFiles.map((file) => file.name), referenceUrls.trim()].filter(Boolean).join('；') || '未提供') : '未提供'}`,
-            ],
-            reproductionMode: generationMode === 'reproduce',
-          }),
-        )
-        const res = await uploadScenarioGenerated(fd)
-        setPublishedId(res?.service?.id || null)
-        if (res?.service?.id && res.service.algorithmArtifact?.status === 'ready' && allowTrial) {
-          try { await setClinicalTrialEnabled(res.service.id, allowTrial) } catch { toast.message('试用权限保存失败，请在工作台重新配置') }
-        }
-        toast.success(res?.service?.algorithmArtifact?.status === 'ready' ? '模型已保存并通过样例运行，可在工作台试用' : '模型已保存，运行规范待配置或样例未通过')
-        return
-      }
-
-      // 路径 B：源码、可选测试脚本和数据集分别交给后端登记。
-      if (sourceMode === 'upload' && files.length > 0) {
-        const scripts = files.filter((file) => file.name.toLowerCase().endsWith('.py'))
-        const datasets = files.filter((file) => /\.(csv|tsv|json|txt|xlsx|parquet)$/i.test(file.name))
-        if (!scripts.length) {
-          toast.message('请至少包含一个 .py 源码文件，或改用「AI 生成」')
-          return
-        }
-        if (scripts.length > 2 || datasets.length > 1 || scripts.length + datasets.length !== files.length) {
-          toast.error('请上传 1 个主源码、至多 1 个测试脚本和 1 个受支持的数据集')
-          return
-        }
-        const primary = scripts[0]
-        const fd = new FormData()
-        fd.append('file', primary)
-        if (scripts[1]) fd.append('test_file', scripts[1])
-        if (datasets[0]) fd.append('dataset_file', datasets[0])
-        fd.append('name', name)
-        fd.append('domain', form.domain)
-        fd.append('industry', form.industry)
-        fd.append('scenario', form.scenario)
-        fd.append('technology', 'AI')
-        fd.append('attribute', 'custom')
-        if (draftId) fd.append('draft_id', draftId)
-        const res = await uploadScenarioGenerated(fd)
-        if (res?.service?.id) {
-          await updateService(res.service.id, {
-            domain: 'health', industry: '临床医疗', scenario: form.scenario,
-            source: {
-              companyName: '临床模型研发团队',
-              msIntroduce: description,
-              companyIntroduce: encodeClinicalCard({ ...clinicalCard, task: form.scenario, specialty: clinicalCard.specialty }),
-            },
-          })
-        }
-        setPublishedId(res?.service?.id || null)
-        toast.success('模型及配套文件已提交，完成临床目录审核后公开展示')
-        return
-      }
-
-      toast.error('请选择上传文件或完成 AI 生成后再提交')
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : '保存失败')
-    } finally {
-      setSaving(false)
-    }
+      await saveQueue.current.catch(() => undefined)
+      const updated = await sendCreationMessage(job.id, text)
+      if (activeTask.current !== job.id) return
+      setJob(updated); setDirty(false); setSaveState('已保存')
+      setMessage('')
+      setGuide({ population: '', inputs: '', output: '' })
+    } catch (error) { toast.error(errorText(error)) }
+    finally { setBusy(false) }
   }
 
-  const previewName = form.name || '算法商品名称'
-  const previewDesc = form.tagline || form.problem || '一句话说明将展示在这里'
+  async function upload(file: File | undefined) {
+    if (!job || !file) return
+    if (!/\.(pdf|docx)$/i.test(file.name) || !file.size || file.size > 10 * 1024 * 1024) { toast.error('请选择不超过 10 MB 的非空 PDF 或 DOCX 文件'); return }
+    setBusy(true); setUploading(true)
+    try {
+      await saveQueue.current.catch(() => undefined)
+      const uploaded = await uploadCreationReference(job.id, file)
+      if (activeTask.current !== job.id) return
+      setJob(uploaded)
+      setDirty(false); setSaveState('已保存')
+      toast.success('论文已上传，可直接生成')
+    } catch (error) { toast.error(errorText(error)) }
+    finally { setBusy(false); setUploading(false) }
+  }
 
-  return (
-    <div className="p-6 lg:p-8" style={{ fontFamily: "'Plus Jakarta Sans', 'Inter', sans-serif" }}>
-      <button onClick={() => navigate('/supplier')} className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-blue-600 transition-colors mb-6">
-        <ArrowLeft size={14} /> 返回供应商中心
-      </button>
+  async function generate() {
+    if (!job) return
+    setBusy(true)
+    try {
+      await saveQueue.current.catch(() => undefined)
+      const saved = await updateCreationJob(job.id, {
+        name: job.name, description: job.description || '依据上传论文复现其中可完整实现的公式或预测模型；缺少必要参数时明确报告。', notes: job.notes,
+      })
+      setDirty(false); setSaveState('已保存')
+      const started = await startCreationGeneration(saved.id)
+      if (activeTask.current !== job.id) return
+      setJob(started)
+      setRevising(false)
+    } catch (error) { toast.error(errorText(error)) }
+    finally { setBusy(false) }
+  }
 
-      <div className="mb-6">
-        {params.get('attach') === '1' && <p className="mb-4 rounded-xl bg-blue-50 px-4 py-3 text-sm text-blue-700">请先补充临床信息，在第三步选择“依据论文或专利复现”并上传论文或规则材料。</p>}
-        <h1 className="text-2xl font-extrabold text-gray-900">{draftId ? '继续编辑模型草稿' : '提交临床模型'}</h1>
-        <p className="text-sm text-gray-500 mt-1">
-          说明适用人群、输入输出、验证证据和使用限制。未审核模型不会进入公开目录。
-        </p>
+  async function publish() {
+    if (!job) return
+    setBusy(true)
+    try {
+      const saved = await publishCreationJob(job.id)
+      if (activeTask.current !== job.id) return
+      setJob(saved)
+      if (saved.serviceId) navigate(`/supplier/trial?id=${saved.serviceId}`)
+    } catch (error) { toast.error(errorText(error)) }
+    finally { setBusy(false) }
+  }
+
+  if (legacyDraft) return <Navigate replace to={`/supplier/create/legacy?draft=${encodeURIComponent(legacyDraft)}`} />
+
+  return <main className="cw-clinical mx-auto max-w-4xl space-y-6 p-6 lg:p-8">
+    <input ref={paperUploadRef} type="file" accept=".pdf,.docx" className="hidden" aria-label="选择要复现的论文文件" onChange={event => { const file = event.target.files?.[0]; event.target.value = ''; void createWithUpload(file) }} />
+    <div className="flex items-start justify-between gap-4">
+      <div>
+        <h1 className="text-2xl font-bold text-gray-900">创建临床模型</h1>
+        <p className="mt-1 text-sm text-gray-600">将临床需求或论文中的方法，制作成可试用的模型。</p>
       </div>
-
-      {/* Stepper — 原设计风格 */}
-      <div className="bg-white rounded-2xl border border-black/5 p-4 mb-6 overflow-x-auto">
-        <div className="flex items-center gap-0 min-w-max">
-          {STEPS.map((s, i) => (
-            <div key={s} className="flex items-center">
-              <div
-                className={`flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap ${
-                  i === step ? 'text-white' : i < step ? 'text-green-700 bg-green-50' : 'text-gray-400'
-                }`}
-                style={i === step ? { background: BLUE } : undefined}
-              >
-                <span
-                  className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold ${
-                    i === step ? 'bg-white text-blue-600' : i < step ? 'bg-green-500 text-white' : 'bg-gray-100 text-gray-500'
-                  }`}
-                >
-                  {i < step ? <Check size={10} /> : i + 1}
-                </span>
-                {s}
-              </div>
-              {i < STEPS.length - 1 && <div className="w-6 h-px bg-gray-200 mx-1" />}
-            </div>
-          ))}
-        </div>
-      </div>
-
-      <div className="flex gap-6">
-        <div className="flex-1 space-y-5 min-w-0">
-          {/* Step 1 */}
-          {step === 0 && (
-            <>
-              <div className="bg-white rounded-2xl border border-black/5 p-6">
-                <h2 className="font-bold text-gray-900 mb-4 flex items-center gap-2">
-                  <span className="w-6 h-6 rounded-full flex items-center justify-center text-white text-xs font-bold" style={{ background: BLUE }}>
-                    1
-                  </span>
-                  基础信息
-                </h2>
-                <div className="space-y-4">
-                  <Field label="算法商品名称" required>
-                    <input
-                      className="input"
-                      value={form.name}
-                      onChange={(e) => setForm({ ...form, name: e.target.value })}
-                      placeholder="例如：成年住院患者 30 天再入院风险预测"
-                    />
-                  </Field>
-                  <Field label="一句话说明" required>
-                    <input
-                      className="input"
-                      value={form.tagline}
-                      onChange={(e) => setForm({ ...form, tagline: e.target.value })}
-                      placeholder="例如：使用入院时可得数据预测 30 天内再入院风险。"
-                    />
-                  </Field>
-                  <div className="grid grid-cols-2 gap-4">
-                    <Field label="适用行业">
-                      <select className="input" value={form.industry} onChange={(e) => setForm({ ...form, industry: e.target.value })}>
-                        {INDUSTRY_OPTIONS.map((o) => (
-                          <option key={o.value} value={o.value}>
-                            {o.label}
-                          </option>
-                        ))}
-                      </select>
-                    </Field>
-                    <Field label="适用场景">
-                      <select className="input" value={form.scenario} onChange={(e) => setForm({ ...form, scenario: e.target.value })}>
-                        <option value="" disabled>请选择适用场景</option>
-                        {SCENARIO_OPTIONS.map((o) => (
-                          <option key={o} value={o}>
-                            {o}
-                          </option>
-                        ))}
-                      </select>
-                    </Field>
-                    <Field label="领域空间">
-                      <select className="input" value={form.domain} onChange={(e) => setForm({ ...form, domain: e.target.value })}>
-                        {DOMAIN_OPTIONS.map((o) => (
-                          <option key={o.value} value={o.value}>
-                            {o.label}
-                          </option>
-                        ))}
-                      </select>
-                    </Field>
-                  </div>
-                </div>
-              </div>
-
-              <div className="bg-white rounded-2xl border border-black/5 p-6">
-                <h2 className="font-bold text-gray-900 mb-4 flex items-center gap-2">
-                  <span className="w-6 h-6 rounded-full flex items-center justify-center text-white text-xs font-bold" style={{ background: BLUE }}>
-                    2
-                  </span>
-                  临床问题描述
-                </h2>
-                <Field label="这个模型解决什么临床问题？">
-                  <textarea
-                    className="input"
-                    rows={5}
-                    value={form.problem}
-                    onChange={(e) => setForm({ ...form, problem: e.target.value })}
-                    placeholder="请描述目标患者、使用时点、可用数据、预测结局和研究目的。"
-                  />
-                </Field>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-4">
-                  <Field label="适用场景说明">
-                    <textarea className="input" rows={3} value={form.suitable} onChange={(e) => setForm({ ...form, suitable: e.target.value })} placeholder="适合哪些临床或研究场景" />
-                  </Field>
-                  <Field label="不适用场景">
-                    <textarea className="input" rows={3} value={form.unsuitable} onChange={(e) => setForm({ ...form, unsuitable: e.target.value })} placeholder="请明确不适用人群及使用限制" />
-                  </Field>
-                </div>
-              </div>
-              <div className="bg-white rounded-2xl border border-black/5 p-6">
-                <h2 className="font-bold text-gray-900 mb-2">临床模型说明卡</h2>
-                <p className="text-xs text-gray-500 mb-4">性能指标只能填写实际评估结果。没有训练数据时，生成的是开发模板。</p>
-                <div className="grid md:grid-cols-2 gap-4">
-                  <Field label="专科场景"><input className="input" value={clinicalCard.specialty} onChange={(e) => setClinicalCard({ ...clinicalCard, specialty: e.target.value })} placeholder="例如：心血管、呼吸、肿瘤、重症" /></Field>
-                  {CARD_FIELDS.map(({ key, label, hint }) => <Field key={key} label={label}>
-                    <textarea className="input" rows={2} value={clinicalCard[key]} onChange={(e) => setClinicalCard({ ...clinicalCard, [key]: e.target.value })} placeholder={hint} />
-                  </Field>)}
-                </div>
-              </div>
-            </>
-          )}
-
-          {/* Step 2: I/O */}
-          {step === 1 && (
-            <div className="bg-white rounded-2xl border border-black/5 p-6 space-y-5">
-              <h2 className="font-bold text-gray-900">配置输入输出</h2>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="rounded-xl border border-gray-100 p-4">
-                  <div className="text-xs font-semibold text-gray-700 mb-3">用户需要准备什么？</div>
-                  <div className="flex flex-wrap gap-2">
-                    {INPUT_OPTIONS.map((opt) => (
-                      <Chip key={opt} active={form.inputTypes.includes(opt)} onClick={() => setForm({ ...form, inputTypes: toggle(form.inputTypes, opt) })}>
-                        {opt}
-                      </Chip>
-                    ))}
-                  </div>
-                </div>
-                <div className="rounded-xl border border-gray-100 p-4">
-                  <div className="text-xs font-semibold text-gray-700 mb-3">用户会得到什么结果？</div>
-                  <div className="flex flex-wrap gap-2">
-                    {OUTPUT_OPTIONS.map((opt) => (
-                      <Chip key={opt} active={form.outputTypes.includes(opt)} onClick={() => setForm({ ...form, outputTypes: toggle(form.outputTypes, opt) })}>
-                        {opt}
-                      </Chip>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Step 3: source — 设计原交互 + 嵌入生成能力 */}
-          {step === 2 && (
-            <div className="space-y-4">
-              <div className="bg-white rounded-2xl border border-black/5 p-6">
-                <h2 className="font-bold text-gray-900 mb-1">上传模型或AI生成算法</h2>
-                <p className="text-xs text-gray-500 mb-4">选择一种方式提供算法能力。</p>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  <SourceCard
-                    active={sourceMode === 'upload'}
-                    icon={UploadCloud}
-                    title="上传算法文件"
-                    desc="上传 .py 源码文件"
-                    color={BLUE}
-                    onClick={() => setSourceMode('upload')}
-                  />
-                  <SourceCard
-                    active={sourceMode === 'generate'}
-                    icon={Sparkles}
-                    title="AI 生成算法"
-                    desc="根据前面业务描述自动生成"
-                    color={GREEN}
-                    onClick={() => setSourceMode('generate')}
-                  />
-                </div>
-              </div>
-
-              {sourceMode === 'upload' && (
-                <div className="bg-white rounded-2xl border border-black/5 p-5">
-                  <Field label="选择文件（主源码 .py，可选测试 .py 和数据集）">
-                    {/* 隐藏原生 input，避免「未选择文件」可点且切换后显示丢失 */}
-                    <input
-                      ref={fileInputRef}
-                      type="file"
-                      accept=".py,.csv,.tsv,.json,.txt,.xlsx,.parquet"
-                      multiple
-                      className="sr-only"
-                      onChange={(e) => {
-                        const picked = Array.from(e.target.files || [])
-                        if (picked.length) {
-                          setFiles((prev) => {
-                            const map = new Map(prev.map((f) => [`${f.name}-${f.size}`, f]))
-                            picked.forEach((f) => map.set(`${f.name}-${f.size}`, f))
-                            return Array.from(map.values())
-                          })
-                        }
-                        // 清空 input value，便于再次选同一文件；已选列表由 React state 持有
-                        e.target.value = ''
-                      }}
-                    />
-                    <div className="flex flex-wrap items-center gap-3 mt-1">
-                      <button
-                        type="button"
-                        onClick={() => fileInputRef.current?.click()}
-                        className="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-semibold text-white rounded-xl hover:opacity-90 transition-opacity"
-                        style={{ background: BLUE }}
-                      >
-                        <UploadCloud size={15} />
-                        选择文件
-                      </button>
-                      <span className="text-xs text-gray-400 select-none pointer-events-none">
-                        {files.length === 0 ? '未选择文件' : `已选 ${files.length} 个文件`}
-                      </span>
-                    </div>
-                    {files.length > 0 && (
-                      <ul className="mt-3 space-y-1.5">
-                        {files.map((f) => (
-                          <li
-                            key={`${f.name}-${f.size}-${f.lastModified}`}
-                            className="relative text-xs bg-gray-50 border border-gray-100 rounded-lg px-3 py-2 pr-10"
-                          >
-                            <span className="block text-gray-700 break-all">{f.name}</span>
-                            <button
-                              type="button"
-                              aria-label={`移除 ${f.name}`}
-                              title="移除文件"
-                              className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full p-1 text-gray-500 hover:bg-gray-100 hover:text-red-600"
-                              onClick={() => setFiles((prev) => prev.filter((x) => !(x.name === f.name && x.size === f.size && x.lastModified === f.lastModified)))}
-                            >
-                              <X size={16} />
-                            </button>
-                          </li>
-                        ))}
-                      </ul>
-                    )}
-                  </Field>
-                </div>
-              )}
-
-              {sourceMode === 'generate' && (
-                <div className="bg-white rounded-2xl border border-black/5 p-5 space-y-4">
-                  <div className="space-y-3 border-b pb-4">
-                    <h3 className="font-semibold text-sm">生成依据与目标</h3>
-                    <div className="flex gap-4 text-sm"><label><input type="radio" checked={generationMode === 'new_design'} onChange={() => { setGenerationMode('new_design'); setGenResult(null) }} /> 按临床需求开发</label><label><input type="radio" checked={generationMode === 'reproduce'} onChange={() => { setGenerationMode('reproduce'); setGenResult(null) }} /> 依据论文或专利复现</label></div>
-                    {generationMode === 'reproduce' && <>
-                      <label className="block text-sm">复现范围<select value={reproduceTarget} onChange={(e) => setReproduceTarget(e.target.value)} className="input mt-1"><option>公式或评分计算</option><option>算法步骤</option><option disabled>已训练模型推理（待支持）</option><option disabled>训练方法与实验（待支持）</option></select></label>
-                      <div className="space-y-2 text-sm">
-                        <p className="font-medium">主论文或专利（PDF / DOCX，可多选，首份作为主资料）</p>
-                        <input ref={mainFileInputRef} type="file" multiple accept=".pdf,.docx" className="sr-only" onChange={(event) => { addMainReferences(Array.from(event.target.files || [])); event.target.value = '' }} />
-                        <button type="button" onClick={() => mainFileInputRef.current?.click()} className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-white font-semibold"><UploadCloud size={15} />选择文件</button>
-                        {mainReferences.map((file) => {
-                          const key = referenceKey(file)
-                          const preview = referencePreviews[key]
-                          return <div key={key} className="relative rounded-xl border bg-white p-3 pr-10 space-y-2">
-                            <button type="button" aria-label={`移除 ${file.name}`} title="移除文件" onClick={() => removeMainReference(file)} className="absolute right-2 top-2 rounded-full p-1 text-gray-500 hover:bg-gray-100 hover:text-red-600"><X size={16} /></button>
-                            <p className="break-all font-medium">{file.name}</p>
-                            {file.name.toLowerCase().endsWith('.pdf') && <button type="button" onClick={() => openOriginalReference(file)} className="text-xs text-blue-600 underline">查看 PDF 原页</button>}
-                            {preview?.loading && <p className="text-xs text-gray-500">正在提取文档文字…</p>}
-                            {preview?.error && <div className="text-xs text-red-600"><p>{preview.error}</p><button type="button" onClick={() => void previewMainReference(file)} className="mt-1 text-blue-600 underline">重试解析</button></div>}
-                            {preview?.text && <><p className="text-xs text-amber-700">公式上标、分式和表格排版请以 PDF 原页为准。</p><pre className="max-h-48 overflow-auto whitespace-pre-wrap text-xs">{preview.text}</pre><label className="flex gap-2 text-xs"><input type="checkbox" checked={reviewedReferences.includes(key)} onChange={(event) => setReviewedReferences((current) => event.target.checked ? [...current, key] : current.filter((item) => item !== key))} />我已对照原页核对这份资料中的关键公式、参数和页码</label></>}
-                            {preview?.truncated && <p className="text-xs text-amber-700">文档超过可处理长度，请在下方说明中写明关键页码、公式与参数。</p>}
-                          </div>
-                        })}
-                      </div>
-                      <div className="space-y-2 text-sm">
-                        <p className="font-medium">补充资料（PDF、文本、代码或 ZIP）</p>
-                        <input ref={supplementalFileInputRef} type="file" multiple accept=".pdf,.docx,.txt,.md,.py,.ipynb,.json,.csv,.zip" className="sr-only" onChange={(event) => { addSupplementalReferences(Array.from(event.target.files || [])); event.target.value = '' }} />
-                        <button type="button" onClick={() => supplementalFileInputRef.current?.click()} className="inline-flex items-center gap-2 rounded-xl border px-4 py-2 font-semibold"><UploadCloud size={15} />选择文件</button>
-                        {referenceFiles.map((file) => <div key={referenceKey(file)} className="relative rounded-xl border bg-white p-3 pr-10"><span className="break-all">{file.name}</span><button type="button" aria-label={`移除 ${file.name}`} title="移除文件" onClick={() => setReferenceFiles((current) => current.filter((item) => referenceKey(item) !== referenceKey(file)))} className="absolute right-2 top-2 rounded-full p-1 text-gray-500 hover:bg-gray-100 hover:text-red-600"><X size={16} /></button></div>)}
-                      </div>
-                      <label className="block text-sm">参考网址（每行一个）<textarea value={referenceUrls} onChange={(e) => setReferenceUrls(e.target.value)} rows={2} className="input mt-1" placeholder="论文或专利的公开网址" /></label>
-                      <label className="block text-sm">重点页码、公式号、实施例及参数说明<textarea value={referenceNotes} onChange={(e) => setReferenceNotes(e.target.value)} rows={3} className="input mt-1" placeholder="例如：第 4 页公式 (3)，表 2 的固定参数；请严格按原文实现" /></label>
-                      <p className="text-xs text-amber-700">请核对提取后的公式、单位与参数。缺少训练数据或模型权重时，生成结果可能只是待配置的开发工程。</p>
-                    </>}
-                  </div>
-                  <div className="flex items-start gap-3">
-                    <div className="w-9 h-9 rounded-xl bg-green-50 flex items-center justify-center shrink-0">
-                      <Cpu size={18} className="text-green-600" />
-                    </div>
-                    <div className="flex-1">
-                      <div className="text-sm font-bold text-gray-900">根据临床问题生成模型开发模板</div>
-                      <p className="text-xs text-gray-500 mt-1 leading-relaxed">
-                        仅发送临床问题、字段结构与数据摘要给生成助手。未提供训练数据时交付开发模板；生成内容不代表已训练或已验证。
-                      </p>
-                    </div>
-                  </div>
-
-                  {!genResult && !generating && (
-                    <Btn onClick={() => void runGenerate()}>
-                      <Sparkles size={14} /> 开始生成
-                    </Btn>
-                  )}
-
-                  {generating && (
-                    <div className="rounded-xl bg-gray-50 border border-gray-100 p-4">
-                      <div className="flex items-center gap-2 text-sm text-blue-600 font-semibold mb-3">
-                        <Loader2 size={16} className="animate-spin" /> {genMsg || '生成中…'}
-                      </div>
-                      <ol className="space-y-1.5">
-                        {PROGRESS_STEPS.map((s) => (
-                          <li key={s.step} className={`text-xs ${s.step <= friendlyStep ? 'text-blue-600' : 'text-gray-400'}`}>
-                            {s.step}. {s.title}
-                          </li>
-                        ))}
-                      </ol>
-                    </div>
-                  )}
-
-                  {genResult && !generating && (
-                    <div className="rounded-xl border border-green-100 bg-green-50/50 p-4 space-y-3">
-                      <div className="text-sm font-semibold text-green-700">已生成：{genResult.code_filename}</div>
-                      <p className="text-xs text-gray-700">运行规范：{genResult.algorithm_spec?.inputs?.length && genResult.smoke_input ? `已提供 ${genResult.algorithm_spec.inputs.length} 个输入字段和样例；保存时将执行真实样例验证` : '未提供完整运行规范；保存后暂不能在线试用'}</p>
-                      <p className="text-xs text-gray-600 leading-relaxed">
-                        {genResult.model_summary?.purpose || form.tagline || form.problem}
-                      </p>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px] text-gray-600">
-                        <div className="bg-white rounded-lg border border-gray-100 px-3 py-2">
-                          <span className="text-gray-400">输入：</span>
-                          {genResult.model_summary?.input_description || form.inputTypes.join(' / ')}
-                        </div>
-                        <div className="bg-white rounded-lg border border-gray-100 px-3 py-2">
-                          <span className="text-gray-400">输出：</span>
-                          {genResult.model_summary?.output_description || form.outputTypes.join(' / ')}
-                        </div>
-                      </div>
-                      <Btn size="sm" variant="outline" onClick={() => void runGenerate()}>
-                        重新生成
-                      </Btn>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Step 4: trial */}
-          {step === 3 && (
-            <div className="bg-white rounded-2xl border border-black/5 p-6 space-y-4">
-              <h2 className="font-bold text-gray-900">配置合成数据试用</h2>
-              <label className="flex items-center gap-2 text-sm text-gray-700">
-                <input type="checkbox" checked={allowTrial} onChange={(e) => setAllowTrial(e.target.checked)} />
-                样例验证通过且目录审核后，允许其他登录用户在线试用
-              </label>
-              <p className="text-xs text-gray-400">提交后模型进入待审核状态。性能指标只能来自实际数据评估。</p>
-              {publishedId && <div className="flex flex-wrap items-center gap-3"><p className="text-xs text-green-600">已提交 ID：{publishedId}</p><button type="button" className="text-sm text-blue-600 font-semibold" onClick={() => navigate(`/supplier/trial?id=${publishedId}`)}>前往在线试用配置 →</button></div>}
-            </div>
-          )}
-
-          <div className="flex justify-between pt-2">
-            <Btn
-              variant="outline"
-              disabled={step === 0 || generating}
-              onClick={() => setStep((s) => Math.max(0, s - 1))}
-            >
-              上一步
-            </Btn>
-            <Btn variant="outline" disabled={saving || generating} onClick={() => void saveDraft()}>
-              {saving ? '保存中…' : '保存草稿'}
-            </Btn>
-            {step < STEPS.length - 1 ? (
-              <Btn
-                disabled={generating}
-                onClick={() => {
-                  if (!validateStep()) return
-                  setStep((s) => s + 1)
-                }}
-              >
-                下一步：{STEPS[step + 1]}
-              </Btn>
-            ) : (
-              <Btn disabled={saving || generating} onClick={() => void submit()}>
-                {saving ? '提交中…' : '保存并进入试用配置'}
-              </Btn>
-            )}
-          </div>
-        </div>
-
-        {/* 右侧买家预览 — 保留原设计 */}
-        <aside className="w-72 shrink-0 hidden xl:block">
-          <div className="sticky top-6 bg-white rounded-2xl border border-black/5 p-5">
-            <div className="flex items-center gap-1.5 text-xs font-semibold text-gray-500 mb-3">
-              <Eye size={13} /> 买家商品页预览
-            </div>
-            <div className="bg-gray-50 rounded-xl p-4 border border-gray-100">
-              <div className="text-sm font-bold text-gray-800">{previewName}</div>
-              <p className="text-xs text-gray-500 mt-2 leading-relaxed line-clamp-4">{previewDesc}</p>
-              <div className="mt-3 space-y-1 text-[11px] text-gray-600">
-                <div>输入：{form.inputTypes.join(' / ') || '—'}</div>
-                <div>输出：{form.outputTypes.join(' / ') || '—'}</div>
-              </div>
-              <div className="flex gap-2 mt-4">
-                <button className="flex-1 py-1.5 text-[10px] font-bold text-white rounded-lg" style={{ background: BLUE }}>
-                  试一下
-                </button>
-                <button className="flex-1 py-1.5 text-[10px] font-semibold text-blue-600 bg-blue-50 rounded-lg">查看详情</button>
-              </div>
-            </div>
-            <p className="text-[10px] text-amber-700 mt-3 leading-relaxed">商品页描述越清晰，买家试用率越高。建议用业务场景举例说明效果。</p>
-          </div>
-        </aside>
-      </div>
-
-      <style>{`
-        .input {
-          width: 100%;
-          margin-top: 0.25rem;
-          padding: 0.625rem 0.875rem;
-          font-size: 0.875rem;
-          background: #f9fafb;
-          border: 1px solid #e5e7eb;
-          border-radius: 0.75rem;
-          outline: none;
-          color: #1f2937;
-        }
-        .input:focus { border-color: #60a5fa; background: #fff; }
-      `}</style>
+      {taskId && <Link to="/supplier/create" className="shrink-0 text-sm text-blue-600">全部任务</Link>}
     </div>
-  )
-}
 
-function Field({ label, required, children }: { label: string; required?: boolean; children: React.ReactNode }) {
-  return (
-    <div>
-      <label className="block text-xs font-semibold text-gray-700 mb-1.5">
-        {label}
-        {required && <span className="text-red-400"> *</span>}
-      </label>
-      {children}
-    </div>
-  )
-}
+    {loading && <p className="text-sm text-gray-500">正在读取任务…</p>}
 
-function Chip({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`px-3 py-1.5 text-xs font-medium rounded-full border transition-all ${
-        active ? 'bg-blue-50 text-blue-600 border-blue-200' : 'bg-white text-gray-600 border-gray-200'
-      }`}
-    >
-      {children}
-    </button>
-  )
-}
-
-function SourceCard({
-  active,
-  icon: Icon,
-  title,
-  desc,
-  color,
-  onClick,
-}: {
-  active: boolean
-  icon: typeof UploadCloud
-  title: string
-  desc: string
-  color: string
-  onClick: () => void
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`text-left rounded-2xl border p-4 transition-all ${
-        active ? 'border-blue-300 bg-blue-50/40 shadow-sm' : 'border-black/5 bg-white hover:border-gray-200'
-      }`}
-    >
-      <div className="w-9 h-9 rounded-xl flex items-center justify-center mb-3" style={{ background: `${color}18` }}>
-        <Icon size={18} style={{ color }} />
+    {!loading && !taskId && <>
+      <section className="rounded-2xl border bg-white p-5 space-y-4">
+        <label className="block font-semibold" htmlFor="create-department">1. 选择所属科室</label>
+        <select id="create-department" value={departmentId} disabled={busy} onChange={event => setDepartmentId(event.target.value)} className="w-full rounded-xl border p-3">
+          <option value="">请选择科室</option>{departments.slice(1).map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+        </select>
+        <h2 className="font-semibold">2. 选择创建方式</h2>
+        <div className="flex flex-wrap gap-2" aria-label="创建方式">
+          {([['examples', '使用示例论文'], ['upload', '上传自己的论文'], ['conversation', '描述临床需求']] as const).map(([key, label]) => <button key={key} disabled={busy} aria-pressed={sourceTab === key} onClick={() => setSourceTab(key)} className={'rounded-lg border px-4 py-2 text-sm ' + (sourceTab === key ? 'border-blue-600 bg-blue-50 text-blue-700' : 'text-gray-600')}>{label}</button>)}
+        </div>
+        {sourceTab === 'examples' && <PaperPicker departmentId={departmentId} busy={busy} onSelect={paper => void usePaper(paper)} />}
+        {uploading && <p role="status" className="text-sm text-blue-700">正在上传并保存论文…</p>}
+      </section>
+      <div className="grid gap-4">
+        {sourceTab === 'conversation' &&
+        <button disabled={busy} onClick={() => void create('conversation')} className="rounded-2xl border bg-white p-6 text-left shadow-sm hover:border-blue-400 disabled:opacity-50">
+          <span className="text-lg font-semibold">我想解决一个临床问题</span>
+          <span className="mt-2 block text-sm text-gray-600">用自然语言描述问题，助手追问必要信息并生成算法。</span>
+        </button>}
+        {sourceTab === 'upload' &&
+        <button disabled={busy} onClick={() => choosePaper()} className="rounded-2xl border bg-white p-6 text-left shadow-sm hover:border-blue-400 disabled:opacity-50">
+          <span className="text-lg font-semibold">我有一篇论文</span>
+          <span className="mt-2 block text-sm text-gray-600">选择 PDF 或 DOCX，上传后填写复现要求并直接生成。</span>
+        </button>}
       </div>
-      <div className="text-sm font-bold text-gray-900">{title}</div>
-      <div className="text-[11px] text-gray-500 mt-1">{desc}</div>
-    </button>
-  )
+      <Link to="/supplier/create/legacy" className="inline-block text-sm text-gray-600 underline">已有 Python 代码？直接上传</Link>
+      {recent.length > 0 && <section className="rounded-2xl border bg-white p-5">
+        <h2 className="mb-3 font-semibold">继续上次的任务</h2>
+        <div className="space-y-2">{(showAllRecent ? recent : recent.slice(0, 5)).map((item) => <Link key={item.id} to={`/supplier/create/task/${item.id}`} className="flex justify-between gap-3 rounded-xl border p-3 text-sm hover:border-blue-400"><span className="min-w-0 break-words">{item.name || item.referenceName || (item.mode === 'paper' ? '论文复现' : '对话创建')}</span><span className="shrink-0 text-right text-gray-500">{statusLabel[item.status]}<small className="block mt-1">{new Date(item.updatedAt).toLocaleDateString()}</small></span></Link>)}</div>
+        {recent.length > 5 && <button className="mt-3 text-sm text-blue-700" onClick={() => setShowAllRecent(!showAllRecent)}>{showAllRecent ? '收起历史任务' : '查看更多历史任务'}</button>}
+      </section>}
+    </>}
+
+    {!loading && taskId && !job && <p className="rounded-xl border bg-white p-4 text-sm text-red-600">任务未找到或当前账号无权查看。</p>}
+
+    {job && <>
+      <section className="rounded-xl border bg-white p-4 text-sm space-y-2">
+        <label htmlFor="job-department" className="font-semibold">所属科室</label>
+        <select id="job-department" value={job.departmentId || ''} disabled={busy || job.status === 'running' || job.status === 'published'} className="ml-3 rounded-lg border p-2" onChange={async event => {
+          const id = event.target.value
+          setBusy(true)
+          try { await saveQueue.current.catch(() => undefined); const updated = await updateCreationJob(job.id, { departmentId: id }); setJob(current => current ? { ...current, departmentId: updated.departmentId, intake: updated.intake, status: updated.status, result: updated.result } : updated) }
+          catch (error) { toast.error(errorText(error)) } finally { setBusy(false) }
+        }}><option value="" disabled>待归类</option>{departments.slice(1).map(d => <option key={d.id} value={d.id}>{d.name}</option>)}</select>
+        {job.intake.catalog?.paperId && <p className="text-gray-600">示例论文与复现要求已带入，可按需修改后直接生成。</p>}
+      </section>
+      <ol className="cw-steps" aria-label="模型创建阶段">
+        {(job.mode === 'paper' ? ['论文与要求', '生成并保存', '试用验证'] : ['提供材料', '核对内容', '生成并保存', '试用验证']).map((label, index) => {
+          const currentStage = job.mode === 'paper' ? stage < 2 ? 0 : stage - 1 : stage
+          return <li key={label} aria-current={currentStage === index ? 'step' : undefined}><span className="mr-2">{index + 1}</span>{label}</li>
+        })}
+      </ol>
+      <div className="cw-task-status">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h2 className="font-semibold">{job.mode === 'paper' ? '论文复现' : '对话创建'}</h2>
+          <span className="rounded-full bg-blue-50 px-3 py-1 text-xs text-blue-700">{statusLabel[job.status]}</span>
+        </div>
+        <p className="text-xs text-gray-500">{saveState} · 可从“创建与任务”返回</p>
+      </div>
+
+      {stage < 2 && step === 0 && job.mode === 'conversation' && <section className="rounded-2xl border bg-white p-5">
+        <h2 className="mb-3 font-semibold">描述您的临床需求</h2>
+        {!job.messages.length && <><div className="cw-filter-chips"><button aria-pressed={guided} onClick={() => setGuided(true)}>按提示填写</button><button aria-pressed={!guided} onClick={() => setGuided(false)}>直接描述</button></div>
+        {guided && <div className="cw-form-stack">{([['population', '用于什么人群或场景？', '例如：成人门诊体重管理'], ['inputs', '有哪些可用指标？', '例如：身高（cm）、体重（kg）'], ['output', '希望得到什么结果？', '例如：计算 BMI']] as const).map(([key, label, hint]) => <label key={key}>{label}<textarea rows={2} maxLength={1200} value={guide[key]} placeholder={hint} onChange={event => setGuide({ ...guide, [key]: event.target.value })} disabled={busy} /></label>)}</div>}</>}
+        {job.messages.length > 0 && <details className="cw-disclosure"><summary>查看历史对话（{job.messages.length} 条）</summary><div className="max-h-80 space-y-3 overflow-auto">{job.messages.map((item, index) => <div key={index} className={`rounded-xl p-3 text-sm ${item.role === 'user' ? 'bg-blue-50' : 'bg-gray-50'}`}><span className="mb-1 block text-xs font-medium text-gray-500">{item.role === 'user' ? '你' : '生成助手'}</span><p className="whitespace-pre-wrap">{item.text}</p></div>)}</div></details>}
+        {job.messages[job.messages.length - 1]?.role === 'assistant' && <div className="cw-notice whitespace-pre-wrap">{job.messages[job.messages.length - 1]?.text}</div>}
+        {(!guided || job.messages.length > 0) && <textarea value={message} onChange={(event) => setMessage(event.target.value)} rows={3} maxLength={4000} placeholder="描述适用人群、需要输入的指标，以及您希望得到的结果。" disabled={busy || job.status === 'running' || job.status === 'published'} className="mt-4 w-full rounded-xl border p-3 text-sm" />}
+        <button onClick={() => void send()} disabled={busy || (guided && !job.messages.length ? !Object.values(guide).some(value => value.trim()) : !message.trim()) || job.status === 'running' || job.status === 'published'} className="mt-2 rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">{busy ? '正在整理…' : job.messages.length ? '补充说明' : '整理需求'}</button>
+      </section>}
+
+      {stage < 2 && job.mode === 'paper' && <section className="space-y-4 rounded-2xl border bg-white p-5">
+        <h2 className="font-semibold">{job.referenceName ? '论文已就绪' : '上传论文'}</h2>
+        {job.referenceName ? <div className="flex flex-wrap items-center gap-3 rounded-xl bg-slate-50 p-3 text-sm">
+          <span className="min-w-0 break-all font-medium">{job.referenceName}</span>
+          <span className="text-green-700">已保存</span>
+          <button type="button" className="text-blue-700 underline" onClick={() => void openCreationReference(job.id, job.referenceName).catch(error => toast.error(errorText(error)))}>下载论文</button>
+        </div> : <p className="text-sm text-gray-500">支持 PDF 或 DOCX，最多 10 MB。</p>}
+        <label className="inline-flex cursor-pointer rounded-lg border px-3 py-2 text-sm text-blue-700">
+          {uploading ? '正在上传…' : job.referenceName ? '更换论文' : '选择论文文件'}
+          <input type="file" aria-label={job.referenceName ? '更换论文' : '选择论文文件'} accept=".pdf,.docx" disabled={busy || saving} onChange={event => { const file = event.target.files?.[0]; event.target.value = ''; void upload(file) }} className="sr-only" />
+        </label>
+        <fieldset disabled={busy} className="space-y-4">
+          <label className="block text-sm">模型名称<input value={job.name} maxLength={100} onChange={event => edit({ name: event.target.value })} onBlur={() => void save({ name: job.name })} placeholder="上传后自动填写，可修改" className="mt-1 w-full rounded-xl border p-2.5" /></label>
+          <label className="block text-sm font-medium">希望复现的部分（选填）<textarea value={job.notes} maxLength={5000} onChange={event => edit({ notes: event.target.value })} onBlur={() => void save({ notes: job.notes })} placeholder="例如：只复现表 2 的评分公式，输入年龄和检查指标，输出总分及风险分层。留空则由系统识别论文中的可复现方法。" rows={5} className="mt-2 w-full rounded-xl border p-3 font-normal" /></label>
+          <p className="text-xs text-gray-500">{saveState} · 点击生成会保存当前复现要求。</p>
+          {missing && <p role="status" className="text-sm text-gray-600">{missing}</p>}
+          <button disabled={busy || Boolean(missing)} onClick={() => void generate()} className="cw-button disabled:opacity-50">{uploading ? '正在上传…' : busy ? '正在提交…' : job.status === 'completed' ? '重新生成模型' : '生成模型'}</button>
+        </fieldset>
+      </section>}
+
+      {stage < 2 && step === 0 && job.mode === 'conversation' && <div className="cw-step-actions"><button className="cw-button" disabled={busy || saving || (job.mode === 'conversation' && (Boolean(message.trim()) || (!job.messages.length && Object.values(guide).some(value => value.trim()))))} onClick={() => showStep(1)}>继续，核对需求</button><span role="status" className="text-xs text-gray-500">填写了内容后，请先点击“整理需求”或“补充说明”</span></div>}
+      {stage < 2 && step === 1 && job.mode === 'conversation' && <section className="space-y-4 rounded-2xl border bg-white p-5"><fieldset disabled={busy} className="space-y-4">
+        <h2 className="font-semibold">核对模型需求</h2><p className="text-sm text-gray-500">确认人群、指标及期望结果。未提供的信息请补充到问题描述中。</p>
+        <label className="block text-sm">模型名称<input value={job.name} maxLength={100} onChange={(event) => edit({ name: event.target.value })} onBlur={() => void save({ name: job.name })} placeholder="例如：成人 BMI 计算" className="mt-1 w-full rounded-xl border p-2.5" /></label>
+        <label className="block text-sm">要解决的问题<textarea value={job.description} maxLength={10000} onChange={(event) => edit({ description: event.target.value })} onBlur={() => void save({ description: job.description })} rows={3} placeholder="输入是什么，希望得到什么结果？" className="mt-1 w-full rounded-xl border p-2.5" /></label>
+        {job.intake.formDraft && Object.keys(job.intake.formDraft).length > 0 && <p className="text-xs text-gray-600">助手已整理需求。请核对上面的名称和问题描述，必要时继续对话修改。</p>}
+        <p className="text-xs text-gray-500">{saveState}</p>
+        {dirty && !saving && <button className="text-sm text-blue-700" onClick={() => void save({ name: job.name, description: job.description, notes: job.notes, referenceReviewed: job.referenceReviewed })}>保存当前内容</button>}
+        {missing && <p role="status" className="text-sm text-amber-700">{missing}</p>}
+        <div className="cw-step-actions"><button className="cw-button secondary" disabled={busy} onClick={() => showStep(0)}>返回材料与对话</button><button disabled={busy || saving || !job.name.trim() || !job.description.trim()} onClick={() => void generate()} className="rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-50">{busy ? '正在提交…' : job.status === 'completed' ? '重新生成' : job.status === 'failed' || job.status === 'interrupted' ? '重新开始生成' : '确认并生成'}</button></div></fieldset>
+      </section>}
+
+      {job.status === 'running' && <section className="rounded-2xl border bg-white p-5" aria-live="polite"><h2 className="font-semibold">正在生成</h2><p className="mt-2 text-sm text-gray-700">{job.progressText || '正在等待处理'}</p><p className="mt-2 text-xs text-gray-500">可离开页面，稍后从“创建与任务”返回。</p><p role="status" className="mt-2 text-xs text-gray-500">最近更新：{new Date(job.updatedAt).toLocaleString()} · {saveState}</p></section>}
+      {(job.status === 'failed' || job.status === 'interrupted') && <p role="alert" className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">{job.error || '生成未完成，请检查内容后重试。'}</p>}
+      {job.status === 'needs_review' && <section role="status" className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm"><h2 className="font-semibold">需要补充或核对资料</h2><p className="mt-2">{job.error}</p><p className="mt-2 text-gray-600">已保留提取结果。请在上方补充要求中说明原文规则或上传完整资料，再开始生成。</p></section>}
+      {!!job.result?.reproduction?.evidence?.rules?.length && <details className="rounded-xl border bg-white p-4"><summary className="cursor-pointer text-sm font-semibold">核对论文规则与出处</summary><p className="mt-2 text-xs text-gray-500">以下为自动提取内容，出处完整不代表医学正确性已经审定。</p><ol className="mt-3 space-y-3">{job.result.reproduction.evidence.rules.map((rule, index) => <li key={rule.id || index} className="border-t pt-3 text-sm"><p>{rule.rule}</p><p className="mt-1 text-xs text-gray-600">第 {rule.source?.page ?? '待核对'} 页 · {rule.source?.location || '出处待补充'}{rule.unit ? ` · 单位：${rule.unit}` : ''}</p>{rule.source?.kind === "supplied_transcription" && <p className="mt-1 text-xs text-amber-700">来源：补充转录，尚未经独立医学审定</p>}{rule.source?.quote && <blockquote className="mt-1 text-xs text-gray-500">{rule.source.quote}</blockquote>}</li>)}</ol></details>}
+
+      {(job.status === 'completed' || job.status === 'published') && !revising && job.result && <section className="space-y-3 rounded-2xl border bg-white p-5">
+        <h2 className="font-semibold">{job.status === 'published' ? '模型已保存' : '模型已生成，请核对后保存'}</h2>
+        <dl className="cw-summary"><div><dt>模型名称</dt><dd>{job.result.model_name || job.name}</dd></div><div><dt>适用范围</dt><dd>{job.result.algorithm_spec?.clinicalScope || job.result.model_summary?.usage_scenarios?.join('；') || '尚未提供，请在试用前核对'}</dd></div><div><dt>输入指标</dt><dd>{job.result.algorithm_spec?.inputs?.map(field => (field.label || field.name) + (field.unit ? '（' + field.unit + '）' : '')).join('、') || job.result.model_summary?.input_description || '尚待完善'}</dd></div><div><dt>输出结果</dt><dd>{job.result.algorithm_spec?.output?.description || job.result.model_summary?.output_description || '尚待完善'}</dd></div></dl>
+        <p className="text-sm">{job.result.model_summary?.purpose || job.description}</p>
+        {job.mode === 'paper' && <p className="text-sm text-amber-700">已生成计算实现，仍需对照论文核对。合成样例和模型自行编写的测试不等于独立临床验证。</p>}
+        <p className="text-xs text-gray-600">{job.result.algorithm_spec?.inputs?.length && job.result.smoke_input ? '已提供输入规范与合成样例；保存时将运行样例验证。' : '运行规范尚不完整；保存后需在试用配置页补充。'}</p>
+        {job.result.model_summary?.limitations && <p className="text-sm text-amber-700">限制：{job.result.model_summary.limitations}</p>}
+        <details><summary className="cursor-pointer text-sm text-blue-600">技术详情：运行规范与源码</summary><pre className="mt-2 max-h-96 overflow-auto whitespace-pre-wrap rounded-xl bg-gray-50 p-3 text-xs">{JSON.stringify(job.result.algorithm_spec || {}, null, 2)}\n\n{job.result.generated_code}</pre></details>
+        {job.status === 'completed' && <button onClick={() => void publish()} disabled={busy} className="rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-50">{busy ? '保存中…' : '保存并试用'}</button>}
+      </section>}
+      {job.status === 'published' && job.serviceId && <Link to={`/supplier/trial?id=${job.serviceId}`} className="inline-block rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white">进入在线试用</Link>}
+      {job.status === 'completed' && !revising && <button className="cw-button secondary" disabled={busy} onClick={() => { if (window.confirm('修改并保存需求后，原生成结果会失效，需要重新生成。是否继续修改？')) { setRevising(true); showStep(1) } }}>返回修改需求</button>}
+      <details className="cw-disclosure"><summary>任务详情</summary><p className="text-xs text-gray-500">任务 ID：{job.id} · 更新时间：{new Date(job.updatedAt).toLocaleString()} · {saveState}</p></details>
+    </>}
+  </main>
 }

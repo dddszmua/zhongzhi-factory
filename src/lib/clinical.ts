@@ -3,6 +3,9 @@ import type { BackendService } from './mappers'
 export const CLINICAL_PREFIX = 'ZZF_CLINICAL_V1:'
 
 export interface ClinicalCard {
+  departmentIds?: string[]
+  paperId?: string
+  paperVersion?: string
   task: string
   specialty: string
   population: string

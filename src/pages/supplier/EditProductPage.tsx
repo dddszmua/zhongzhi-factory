@@ -3,13 +3,13 @@ import { useNavigate, useParams } from 'react-router'
 import { toast } from 'sonner'
 import { getMyAlgorithmModels, updateService } from '@/api/services'
 import { useAuth } from '@/auth/AuthContext'
-import { DOMAIN_OPTIONS, INDUSTRY_OPTIONS } from '@/lib/constants'
+import { departments } from '@/lib/departments'
 import { emptyClinicalCard, encodeClinicalCard, readClinicalCard, type ClinicalCard } from '@/lib/clinical'
 import type { BackendService } from '@/lib/mappers'
 import { Btn } from '@/components/ui/Btn'
 
 const cardFields: Array<{ key: keyof ClinicalCard; label: string }> = [
-  { key: 'specialty', label: '专科' }, { key: 'population', label: '适用人群与纳入条件' },
+  { key: 'population', label: '适用人群与纳入条件' },
   { key: 'exclusions', label: '排除与不适用情况' }, { key: 'inputs', label: '输入字段及医学含义' },
   { key: 'units', label: '计量单位和允许范围' }, { key: 'missing', label: '缺失值处理' },
   { key: 'output', label: '输出含义' }, { key: 'timepoint', label: '使用时点' }, { key: 'horizon', label: '预测时间范围' },
@@ -46,6 +46,7 @@ export function EditProductPage() {
       toast.error('请填写商品名称')
       return
     }
+    if (!card.departmentIds?.length) { toast.error('请选择所属科室'); return }
     if (!card.population.trim() || !card.inputs.trim() || !card.output.trim() || !card.intendedUse.trim()) {
       toast.error('请填写适用人群、输入、输出和允许使用场景')
       return
@@ -79,10 +80,7 @@ export function EditProductPage() {
       <div className="bg-white rounded-2xl border border-gray-100 p-6 space-y-5">
         <label className="block text-sm font-semibold text-gray-700">商品名称<input value={form.name} maxLength={100} onChange={(event) => setForm({ ...form, name: event.target.value })} className="block w-full mt-2 border border-gray-200 rounded-xl px-3 py-2.5 font-normal" /></label>
         <label className="block text-sm font-semibold text-gray-700">业务描述<textarea value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} rows={5} className="block w-full mt-2 border border-gray-200 rounded-xl px-3 py-2.5 font-normal resize-y" /></label>
-        <div className="grid sm:grid-cols-2 gap-4">
-          <label className="block text-sm font-semibold text-gray-700">领域<select value={form.domain} onChange={(event) => setForm({ ...form, domain: event.target.value })} className="block w-full mt-2 border border-gray-200 rounded-xl px-3 py-2.5 font-normal">{DOMAIN_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>
-          <label className="block text-sm font-semibold text-gray-700">行业<select value={form.industry} onChange={(event) => setForm({ ...form, industry: event.target.value })} className="block w-full mt-2 border border-gray-200 rounded-xl px-3 py-2.5 font-normal"><option value="">未指定</option>{INDUSTRY_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>
-        </div>
+        <label className="block text-sm font-semibold text-gray-700">所属科室<select value={card.departmentIds?.[0] || ''} onChange={event => setCard({ ...card, departmentIds: [event.target.value], specialty: departments.find(d => d.id === event.target.value)?.name || '' })} className="block w-full mt-2 border border-gray-200 rounded-xl px-3 py-2.5 font-normal"><option value="" disabled>请选择科室</option>{departments.slice(1).map(d => <option key={d.id} value={d.id}>{d.name}</option>)}</select></label>
         <label className="block text-sm font-semibold text-gray-700">业务场景<input value={form.scenario} maxLength={50} onChange={(event) => setForm({ ...form, scenario: event.target.value })} className="block w-full mt-2 border border-gray-200 rounded-xl px-3 py-2.5 font-normal" /></label>
         <div className="grid sm:grid-cols-2 gap-4">{cardFields.map(({ key, label }) => <label key={key} className="block text-sm font-semibold text-gray-700">{label}<textarea value={card[key]} onChange={(event) => setCard({ ...card, [key]: event.target.value })} rows={2} className="block w-full mt-2 border border-gray-200 rounded-xl p-3 font-normal resize-y" /></label>)}</div>
         <div className="flex gap-3"><Btn disabled={saving} onClick={() => void save()}>{saving ? '保存中…' : '保存修改'}</Btn><Btn variant="outline" onClick={() => navigate(`/supplier/trial?id=${id}`)}>试用配置</Btn></div>

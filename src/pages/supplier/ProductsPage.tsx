@@ -36,7 +36,7 @@ export function SupplierProductsPage() {
       } catch (cause) {
         if (!cancelled) {
           setProducts([])
-          setError(cause instanceof Error ? cause.message : '商品加载失败')
+          setError(cause instanceof Error ? cause.message : '模型加载失败')
         }
       } finally {
         if (!cancelled) setLoading(false)
@@ -49,7 +49,7 @@ export function SupplierProductsPage() {
 
   const filtered = useMemo(() => {
     return products.filter((p) => {
-      if (filter === 'listed' && p.productStatus !== 'listed') return false
+      if (filter === 'listed' && !isClinicalListed(p.raw)) return false
       if (filter === 'draft' && p.productStatus !== 'draft') return false
       if (filter === 'trialable' && !p.trialable) return false
       if (filter === 'unclassified' && (p.raw.domain === 'health' && readClinicalCard(p.raw))) return false
@@ -69,7 +69,7 @@ export function SupplierProductsPage() {
 
   const chips: Array<{ key: FilterKey; label: string }> = [
     { key: 'all', label: '全部' },
-    { key: 'listed', label: '已上架' },
+    { key: 'listed', label: '已进入公开目录' },
     { key: 'draft', label: '草稿' },
     { key: 'trialable', label: '可试用' },
     { key: 'unclassified', label: '待归类历史模型' },
@@ -83,7 +83,7 @@ export function SupplierProductsPage() {
           <p className="text-sm text-gray-500 mt-1">历史模型需补充临床说明卡并完成审核，才会进入公开目录。</p>
         </div>
         <Btn onClick={() => navigate('/supplier/create')}>
-          <PlusCircle size={14} /> 提交临床模型
+          <PlusCircle size={14} /> 创建临床模型
         </Btn>
       </div>
 
@@ -117,10 +117,10 @@ export function SupplierProductsPage() {
           {loading ? (
             <div className="text-sm text-gray-400 py-12 text-center">加载中…</div>
           ) : error ? (
-            <div className="text-sm text-red-600 py-12 text-center bg-white rounded-2xl border border-black/5">商品加载失败：{error}</div>
+            <div className="text-sm text-red-600 py-12 text-center bg-white rounded-2xl border border-black/5">模型加载失败：{error}</div>
           ) : filtered.length === 0 ? (
             <div className="text-sm text-gray-400 py-12 text-center bg-white rounded-2xl border border-black/5">
-              暂无商品，点击「发布新算法」开始创建
+              暂无符合条件的模型，点击“创建临床模型”开始。
             </div>
           ) : (
             filtered.map((p) => (
@@ -139,16 +139,16 @@ export function SupplierProductsPage() {
                     </Badge>
                   ))}
                   {p.trialable && <Badge color="blue">可试用</Badge>}
-                  <Badge color={isClinicalListed(p.raw) ? 'green' : 'amber'}>{isClinicalListed(p.raw) ? '临床目录已审核' : p.raw.domain !== 'health' || !readClinicalCard(p.raw) ? '待归类' : '临床目录待审核'}</Badge>
+                  <Badge color={isClinicalListed(p.raw) ? 'green' : 'amber'}>{isClinicalListed(p.raw) ? '临床目录已审核' : p.raw.domain !== 'health' || !readClinicalCard(p.raw) ? '待归类' : readClinicalCard(p.raw)?.reviewStatus === 'rejected' ? '临床目录审核未通过' : '临床目录待审核'}</Badge>
                 </div>
                 <div className="grid grid-cols-2 gap-2 mt-3 text-xs text-gray-500">
                   <div>输入：{p.inputType}</div>
                   <div>输出：{p.outputType}</div>
-                  <div>调用：{p.trialCount}</div>
+                  <div>公开试用：{p.raw.onlineUsage?.publicTrialEnabled ? '已开启' : '未开启'}</div>
                   <div>场景：{p.domainLabel}</div>
                 </div>
-                <div className="flex gap-2 mt-4">
-                  {p.status === 'draft' ? <button className="px-3 py-1.5 text-xs font-semibold text-blue-600 bg-blue-50 rounded-lg" onClick={() => navigate(`/supplier/create?draft=${p.id}`)}>继续编辑草稿</button> : <button className="px-3 py-1.5 text-xs font-semibold text-blue-600 bg-blue-50 rounded-lg" onClick={() => navigate(`/supplier/products/${p.id}/edit`)}>编辑商品</button>}
+                <div className="flex flex-wrap gap-2 mt-4">
+                  {p.status === 'draft' ? <button className="px-3 py-1.5 text-xs font-semibold text-blue-600 bg-blue-50 rounded-lg" onClick={() => navigate(`/supplier/create?draft=${p.id}`)}>继续编辑草稿</button> : <button className="px-3 py-1.5 text-xs font-semibold text-blue-600 bg-blue-50 rounded-lg" onClick={() => navigate(`/supplier/products/${p.id}/edit`)}>编辑模型资料</button>}
                   {isClinicalListed(p.raw) && <button
                     className="px-3 py-1.5 text-xs font-semibold text-white rounded-lg"
                     style={{ background: BLUE }}
@@ -168,10 +168,6 @@ export function SupplierProductsPage() {
                   >
                     查看生成源码
                   </button>}
-                  {p.status !== 'draft' && <button
-                    className="px-3 py-1.5 text-xs font-semibold text-blue-600 bg-blue-50 rounded-lg"
-                    onClick={() => navigate(`/supplier/mcp/create?sourceServiceId=${encodeURIComponent(p.id)}`)}
-                  >发布为可调用服务</button>}
                 </div>
               </div>
             ))
@@ -180,8 +176,8 @@ export function SupplierProductsPage() {
 
         <aside>
           <div className="bg-white rounded-2xl border border-black/5 p-5 sticky top-6">
-            <h3 className="font-bold text-gray-900 text-sm mb-1">商品完整度</h3>
-            <p className="text-xs text-gray-400 mb-4">基于当前列表首个商品示意（价格/认证项首期不展示）</p>
+            <h3 className="font-bold text-gray-900 text-sm mb-1">模型资料完整度</h3>
+            <p className="text-xs text-gray-400 mb-4">当前首个模型的资料填写情况</p>
             {completeness ? (
               <>
                 <div className="text-2xl font-extrabold text-gray-900 mb-3">{completeness.percent}%</div>
@@ -197,7 +193,7 @@ export function SupplierProductsPage() {
                 </ul>
               </>
             ) : (
-              <div className="text-xs text-gray-400">创建商品后可查看完整度</div>
+              <div className="text-xs text-gray-400">创建模型后可查看资料填写情况</div>
             )}
           </div>
         </aside>
